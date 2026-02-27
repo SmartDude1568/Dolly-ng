@@ -4,3 +4,5 @@ dist/*
 .claude/
 songs/
 output/*
+.DS_STORE
+vendor/

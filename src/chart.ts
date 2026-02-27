@@ -111,18 +111,42 @@ export class Audio2Chart {
         }
     }
 
-    /** Resolve the system Python command (tries python3 first, then python). */
+    /**
+     * Resolve a compatible system Python command.
+     * numba requires Python >=3.10,<3.14, so prefer specific versioned
+     * commands before falling back to the generic python3/python.
+     */
     private async findSystemPython(): Promise<string> {
-        for (const cmd of ["python3", "python"]) {
+        // Try specific compatible versions first (newest to oldest)
+        const candidates = [
+            "python3.13",
+            "python3.12",
+            "python3.11",
+            "python3.10",
+            "python3",
+            "python",
+        ];
+
+        for (const cmd of candidates) {
             try {
-                await this.execFileAsync(cmd, ["--version"], { timeout: 10_000 });
-                return cmd;
+                const { stdout } = await this.execFileAsync(cmd, ["--version"], {
+                    timeout: 10_000,
+                });
+                // Validate version is in the compatible range
+                const match = stdout.trim().match(/Python\s+3\.(\d+)/);
+                if (match) {
+                    const minor = parseInt(match[1], 10);
+                    if (minor >= 10 && minor < 14) {
+                        return cmd;
+                    }
+                }
             } catch {
                 // try next
             }
         }
         throw new Error(
-            "Python is not installed or not in PATH. Please install Python 3 and try again.",
+            "No compatible Python found (requires >=3.10,<3.14). " +
+            "Please install Python 3.10–3.13 and try again.",
         );
     }
 
