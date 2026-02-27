@@ -1,0 +1,22 @@
+{
+  "name": "dolly",
+  "version": "0.0.2",
+  "description": "An automated tool to generate a full Guitar/Clone Hero level from an audio file.",
+  "type": "module",
+  "main": "dist/index.js",
+  "author": "Aidan Walker",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "test": "tsx tests/audio-analyzer.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts",
+    "test:split": "tsx tests/split.test.ts",
+    "test:cache": "tsx tests/cache.test.ts",
+    "test:chart": "tsx tests/chart.test.ts"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsx": "^4.19.0"
+  }
+}
