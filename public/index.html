@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dolly</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Dolly</h1>
+    <p>Generate Clone Hero charts from audio files.</p>
+
+    <div id="status-bar">
+        <span id="auth-status">Not logged in</span>
+        <button id="logout-btn" hidden>Log out</button>
+    </div>
+
+    <!-- Auth section -->
+    <section id="auth-section">
+        <h2>Register</h2>
+        <form id="register-form">
+            <label>Email <input type="email" name="email" required></label>
+            <label>Password <input type="password" name="password" minlength="8" required></label>
+            <label>Display name <input type="text" name="display_name"></label>
+            <button type="submit">Register</button>
+        </form>
+
+        <h2>Log in</h2>
+        <form id="login-form">
+            <label>Email <input type="email" name="email" required></label>
+            <label>Password <input type="password" name="password" required></label>
+            <button type="submit">Log in</button>
+        </form>
+    </section>
+
+    <!-- Main app section -->
+    <section id="app-section" hidden>
+        <h2>Upload audio file</h2>
+        <form id="upload-form">
+            <label>Audio file <input type="file" name="file" accept="audio/*" required></label>
+            <label>Name <input type="text" name="name"></label>
+            <button type="submit">Upload</button>
+        </form>
+
+        <h2>Your files</h2>
+        <button id="refresh-files">Refresh</button>
+        <ul id="file-list"></ul>
+
+        <h2>Start conversion</h2>
+        <form id="conversion-form">
+            <label>File ID <input type="text" name="input_file_id" required></label>
+            <label>Instruments (comma-separated) <input type="text" name="instruments" value="guitar,bass,drums"></label>
+            <label>Difficulty
+                <select name="difficulty">
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                    <option value="expert" selected>Expert</option>
+                </select>
+            </label>
+            <button type="submit">Start conversion</button>
+        </form>
+
+        <h2>Your conversions</h2>
+        <button id="refresh-conversions">Refresh</button>
+        <ul id="conversion-list"></ul>
+    </section>
+
+    <!-- Chart generation (Modal-backed audio2chart) -->
+    <section id="chart-section">
+        <h2>Generate chart from audio</h2>
+        <p>Drops the audio straight into the Modal-hosted audio2chart pipeline. Audio must be at least 30 seconds.</p>
+        <form id="chart-form">
+            <label>Audio file <input type="file" name="audio" accept="audio/*" required></label>
+            <label>Song name <input type="text" name="name" placeholder="(optional)"></label>
+            <label>Artist <input type="text" name="artist" placeholder="(optional)"></label>
+            <label>Temperature <input type="number" name="temperature" step="0.1" min="0" max="2" value="0.5"></label>
+            <label>Top-k <input type="number" name="top_k" min="0" value="32"></label>
+            <button type="submit">Generate chart</button>
+        </form>
+
+        <div id="chart-job" hidden>
+            <p id="chart-stage">Queued…</p>
+            <progress id="chart-progress" value="0" max="1"></progress>
+            <p id="chart-progress-text"></p>
+            <p id="chart-result"></p>
+        </div>
+    </section>
+
+    <div id="message"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

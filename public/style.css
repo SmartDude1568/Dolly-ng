@@ -1,0 +1,79 @@
+body {
+    font-family: system-ui, sans-serif;
+    max-width: 720px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+}
+
+h1 {
+    margin-bottom: 0.25rem;
+}
+
+h2 {
+    margin-top: 2rem;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 0.25rem;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 400px;
+    margin-bottom: 1rem;
+}
+
+label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.9rem;
+}
+
+input, select, button {
+    padding: 0.4rem;
+    font-size: 1rem;
+}
+
+button {
+    cursor: pointer;
+    align-self: flex-start;
+}
+
+#status-bar {
+    padding: 0.5rem;
+    background: #f0f0f0;
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+ul {
+    padding-left: 1.25rem;
+}
+
+li {
+    margin-bottom: 0.25rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+#message {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    padding: 0.75rem 1rem;
+    background: #333;
+    color: white;
+    border-radius: 4px;
+    max-width: 300px;
+}
+
+#message:empty {
+    display: none;
+}
+
+#message.error {
+    background: #a33;
+}

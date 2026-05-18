@@ -134,7 +134,7 @@ export class Audio2Chart {
                 });
                 // Validate version is in the compatible range
                 const match = stdout.trim().match(/Python\s+3\.(\d+)/);
-                if (match) {
+                if (match && match[1] !== undefined) {
                     const minor = parseInt(match[1], 10);
                     if (minor >= 10 && minor < 14) {
                         return cmd;

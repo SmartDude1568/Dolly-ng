@@ -1,8 +1,24 @@
 node_modules/
 package-lock.json
 dist/*
-.claude/
 songs/
 output/*
 .DS_STORE
 vendor/
+
+# credentials and local config
+.env
+.env.*
+.claude/settings.local.json
+
+# python bytecode
+modal/__pycache__/
+**/__pycache__/
+*.pyc
+
+# experimental local test scripts
+modaltest/
+modaltest.*
+
+# claude tooling
+skills-lock.json

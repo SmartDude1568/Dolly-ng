@@ -7,12 +7,19 @@
   "author": "Aidan Walker",
   "license": "GPL-3.0-only",
   "scripts": {
-    "test": "tsx tests/audio-analyzer.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts",
+    "test": "tsx tests/audio-analyzer.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts && tsx tests/chart-merge.test.ts",
+    "test:merge": "tsx tests/chart-merge.test.ts",
     "test:split": "tsx tests/split.test.ts",
     "test:cache": "tsx tests/cache.test.ts",
     "test:chart": "tsx tests/chart.test.ts"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.0.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.0",
+    "multer": "^2.1.1",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
