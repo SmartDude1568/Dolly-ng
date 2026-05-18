@@ -1,9 +1,15 @@
 import { Router } from "express";
 import * as crypto from "node:crypto";
 import { requireAuth } from "../middleware.js";
-import { files, tasks, slots } from "../stores.js";
-import type { TaskRecord, TaskType, TaskStatus } from "../types.js";
-import { TERMINAL_STATUSES } from "../types.js";
+import { slots } from "../stores.js";
+import {
+    dbGetFile,
+    dbInsertTask,
+    dbGetTask,
+    dbListTasks,
+    dbUpdateTask,
+} from "../db-helpers.js";
+import type { TaskRecord, TaskType } from "../types.js";
 
 export const tasksRouter = Router();
 
@@ -13,7 +19,7 @@ const VALID_TASK_TYPES: ReadonlySet<string> = new Set(["split_stems", "audio2cha
 
 // ── POST /tasks ─────────────────────────────────────────────────────────
 
-tasksRouter.post("/", (req, res) => {
+tasksRouter.post("/", async (req, res) => {
     const { type, input_file_id, settings } = req.body as {
         type?: string;
         input_file_id?: string;
@@ -34,7 +40,7 @@ tasksRouter.post("/", (req, res) => {
         return;
     }
 
-    const file = files.get(input_file_id);
+    const file = await dbGetFile(input_file_id);
     if (!file || file.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "Input file not found" },
@@ -58,18 +64,18 @@ tasksRouter.post("/", (req, res) => {
         error: null,
     };
 
-    tasks.set(record.task_id, record);
+    await dbInsertTask(record);
 
-    // Stub scheduling: move to queued, attempt slot assignment
-    scheduleTask(record);
+    // Stub scheduling: try to assign an idle slot
+    await scheduleTask(record);
 
     res.status(201).json(publicTask(record));
 });
 
 // ── GET /tasks/:task_id ─────────────────────────────────────────────────
 
-tasksRouter.get("/:task_id", (req, res) => {
-    const record = tasks.get(req.params.task_id);
+tasksRouter.get("/:task_id", async (req, res) => {
+    const record = await dbGetTask(req.params.task_id);
     if (!record || record.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "Task not found" },
@@ -82,38 +88,22 @@ tasksRouter.get("/:task_id", (req, res) => {
 
 // ── GET /tasks ──────────────────────────────────────────────────────────
 
-tasksRouter.get("/", (req, res) => {
+tasksRouter.get("/", async (req, res) => {
     const userId = req.auth!.user_id;
     const statusFilter = req.query.status as string | undefined;
     const typeFilter = req.query.type as string | undefined;
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
     const perPage = Math.min(100, Math.max(1, parseInt(req.query.per_page as string, 10) || 20));
 
-    let userTasks = [...tasks.values()].filter((t) => t.user_id === userId);
+    const { tasks, total } = await dbListTasks(userId, statusFilter, typeFilter, page, perPage);
 
-    if (statusFilter) {
-        userTasks = userTasks.filter((t) => t.status === statusFilter);
-    }
-    if (typeFilter) {
-        userTasks = userTasks.filter((t) => t.type === typeFilter);
-    }
-
-    const total = userTasks.length;
-    const start = (page - 1) * perPage;
-    const paged = userTasks.slice(start, start + perPage);
-
-    res.json({
-        tasks: paged.map(publicTask),
-        total,
-        page,
-        per_page: perPage,
-    });
+    res.json({ tasks: tasks.map(publicTask), total, page, per_page: perPage });
 });
 
 // ── DELETE /tasks/:task_id ──────────────────────────────────────────────
 
-tasksRouter.delete("/:task_id", (req, res) => {
-    const record = tasks.get(req.params.task_id);
+tasksRouter.delete("/:task_id", async (req, res) => {
+    const record = await dbGetTask(req.params.task_id);
     if (!record || record.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "Task not found" },
@@ -131,7 +121,7 @@ tasksRouter.delete("/:task_id", (req, res) => {
         return;
     }
 
-    record.status = "cancelled";
+    await dbUpdateTask(record.task_id, { status: "cancelled" });
     res.status(204).end();
 });
 
@@ -165,24 +155,18 @@ function publicTask(t: TaskRecord) {
     };
 }
 
-/**
- * Stub scheduler: moves a task to "queued" and tries to find an idle slot
- * with a matching capability.  Real implementation would be async and event-driven.
- */
-function scheduleTask(task: TaskRecord): void {
+async function scheduleTask(task: TaskRecord): Promise<void> {
     task.status = "queued";
+    await dbUpdateTask(task.task_id, { status: "queued" });
 
     for (const slot of slots.values()) {
-        if (
-            slot.status === "idle" &&
-            slot.capabilities.includes(task.type)
-        ) {
+        if (slot.status === "idle" && slot.capabilities.includes(task.type)) {
             slot.status = "busy";
             slot.current_task_id = task.task_id;
             task.status = "assigned";
             task.slot_id = slot.slot_id;
+            await dbUpdateTask(task.task_id, { status: "assigned", slot_id: slot.slot_id });
             return;
         }
     }
-    // No slot available — task stays queued
 }

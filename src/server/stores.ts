@@ -1,18 +1,10 @@
 /**
- * In-memory data stores for resources not yet backed by Neon DB.
- * Users and sessions are now stored in Neon PostgreSQL.
+ * In-memory stores for resources whose state is transient (not persisted to DB).
+ * Files, tasks, and conversions have been migrated to Neon PostgreSQL.
+ * Slots represent live compute resources and remain in-memory.
  */
 
-import type {
-    FileRecord,
-    TaskRecord,
-    ConversionRecord,
-    SlotRecord,
-} from "./types.js";
-
-export const files = new Map<string, FileRecord>();            // file_id → FileRecord
-export const tasks = new Map<string, TaskRecord>();            // task_id → TaskRecord
-export const conversions = new Map<string, ConversionRecord>();// conv_id → ConversionRecord
+import type { SlotRecord } from "./types.js";
 
 // Pre-seed a few slots so the internal API has something to return.
 export const slots = new Map<string, SlotRecord>([

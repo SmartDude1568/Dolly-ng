@@ -9,6 +9,8 @@ import { Audio2Chart } from "./chart.js";
 import { parseChart } from "./chart/parse.js";
 import { writeChart } from "./chart/write.js";
 import { mergeCharts } from "./chart/merge.js";
+import { writeSngFromDir, type SngMetadata } from "./sng.js";
+import { findCloneHeroSongsDir, installSng } from "./clonehero.js";
 
 interface CliOptions {
     audioFile: string;
@@ -29,6 +31,10 @@ interface CliOptions {
     charterName?: string;
     mergeFiles?: string[];
     mergeOutput?: string;
+    sng?: boolean;
+    sngOutput?: string;
+    installCH?: boolean;
+    songsDir?: string;
 }
 
 function printUsage(): void {
@@ -57,6 +63,10 @@ Options:
   --charter-name <name> Charter name for chart metadata
   --merge <files...>  Merge multiple .chart files into one (space-separated paths)
   --merge-output <path> Output path for merged chart (default: <output>/merged.chart)
+  --sng               Package output into a .sng archive after charting
+  --sng-output <path> Path for the .sng file (default: <output>/<song-name>.sng)
+  --install-ch        Copy the .sng into the Clone Hero songs directory
+  --songs-dir <dir>   Override the Clone Hero songs directory path
   --help              Show this help message
 
 Examples:
@@ -199,6 +209,24 @@ function parseArgs(args: string[]): CliOptions & { listStems?: boolean; help?: b
                 process.exit(1);
             }
             options.mergeOutput = value;
+        } else if (arg === "--sng") {
+            options.sng = true;
+        } else if (arg === "--sng-output") {
+            const value = args[++i];
+            if (!value) {
+                console.error("Error: --sng-output requires a value");
+                process.exit(1);
+            }
+            options.sngOutput = value;
+        } else if (arg === "--install-ch") {
+            options.installCH = true;
+        } else if (arg === "--songs-dir") {
+            const value = args[++i];
+            if (!value) {
+                console.error("Error: --songs-dir requires a value");
+                process.exit(1);
+            }
+            options.songsDir = value;
         } else if (arg === "--list-stems") {
             options.listStems = true;
         } else if (!arg.startsWith("-") && !options.audioFile) {
@@ -391,16 +419,59 @@ async function main(): Promise<void> {
             }
 
             // Auto-merge generated charts if more than one was produced
+            let finalChartPath: string | undefined;
             if (chartPaths.length > 1) {
                 const mergeOutput = options.mergeOutput ?? path.join(options.outputDir, "merged.chart");
                 runMerge(chartPaths, mergeOutput, options);
+                finalChartPath = mergeOutput;
             } else if (chartPaths.length === 1) {
                 console.log(`\nOnly one chart generated — no merge needed.`);
+                finalChartPath = chartPaths[0];
+            }
+
+            // SNG packaging
+            if (options.sng && finalChartPath) {
+                await runSngPackage(finalChartPath, options);
             }
         }
     } catch (error) {
         console.error("Error during split:", error instanceof Error ? error.message : error);
         process.exit(1);
+    }
+}
+
+async function runSngPackage(chartPath: string, options: CliOptions): Promise<void> {
+    console.log("\nPackaging .sng archive…");
+
+    const songName = options.songName ?? path.basename(options.audioFile, path.extname(options.audioFile));
+    const sngPath = options.sngOutput ?? path.join(options.outputDir, `${songName}.sng`);
+
+    const metadata: SngMetadata = {};
+    if (options.songName) metadata.name = options.songName;
+    if (options.songArtist) metadata.artist = options.songArtist;
+    if (options.songGenre) metadata.genre = options.songGenre;
+    if (options.charterName) metadata.charter = options.charterName;
+
+    try {
+        writeSngFromDir(options.outputDir, sngPath, metadata);
+        console.log(`SNG written to: ${path.resolve(sngPath)}`);
+    } catch (err) {
+        console.error("Error packaging .sng:", err instanceof Error ? err.message : err);
+        return;
+    }
+
+    // Optionally install into Clone Hero songs directory
+    if (options.installCH) {
+        const songsDir = options.songsDir ?? findCloneHeroSongsDir();
+        if (!songsDir) {
+            console.warn(
+                "Could not detect Clone Hero songs directory.\n" +
+                "Use --songs-dir to specify it manually.",
+            );
+            return;
+        }
+        const dest = installSng(sngPath, songsDir);
+        console.log(`Installed to Clone Hero songs: ${dest}`);
     }
 }
 

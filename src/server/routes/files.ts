@@ -5,9 +5,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import multer from "multer";
 import { requireAuth } from "../middleware.js";
-import { files, tasks } from "../stores.js";
-import type { FileRecord, PaginationParams } from "../types.js";
-import { TERMINAL_STATUSES } from "../types.js";
+import {
+    dbInsertFile,
+    dbGetFile,
+    dbListFiles,
+    dbDeleteFile,
+    dbIsFileInUse,
+} from "../db-helpers.js";
+import type { FileRecord } from "../types.js";
 
 export const filesRouter = Router();
 
@@ -46,12 +51,11 @@ const upload = multer({
     },
 });
 
-// All file routes require auth
 filesRouter.use(requireAuth);
 
 // ── POST /files/upload ──────────────────────────────────────────────────
 
-filesRouter.post("/upload", upload.single("file"), (req, res) => {
+filesRouter.post("/upload", upload.single("file"), async (req, res) => {
     if (!req.file) {
         res.status(400).json({
             error: { code: "BAD_REQUEST", message: "Missing required field: file" },
@@ -71,7 +75,7 @@ filesRouter.post("/upload", upload.single("file"), (req, res) => {
         local_path: req.file.path,
     };
 
-    files.set(record.file_id, record);
+    await dbInsertFile(record);
 
     res.status(201).json({
         file_id: record.file_id,
@@ -84,8 +88,8 @@ filesRouter.post("/upload", upload.single("file"), (req, res) => {
 
 // ── GET /files/:file_id ─────────────────────────────────────────────────
 
-filesRouter.get("/:file_id", (req, res) => {
-    const record = files.get(req.params.file_id);
+filesRouter.get("/:file_id", async (req, res) => {
+    const record = await dbGetFile(req.params.file_id);
     if (!record || record.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "File not found" },
@@ -105,8 +109,8 @@ filesRouter.get("/:file_id", (req, res) => {
 
 // ── GET /files/:file_id/download ────────────────────────────────────────
 
-filesRouter.get("/:file_id/download", (req, res) => {
-    const record = files.get(req.params.file_id);
+filesRouter.get("/:file_id/download", async (req, res) => {
+    const record = await dbGetFile(req.params.file_id);
     if (!record || record.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "File not found" },
@@ -126,33 +130,17 @@ filesRouter.get("/:file_id/download", (req, res) => {
 
 // ── GET /files ──────────────────────────────────────────────────────────
 
-filesRouter.get("/", (req, res) => {
+filesRouter.get("/", async (req, res) => {
     const userId = req.auth!.user_id;
-
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
     const perPage = Math.min(100, Math.max(1, parseInt(req.query.per_page as string, 10) || 20));
     const sort = (req.query.sort as string) ?? "created_at";
     const order = (req.query.order as string) === "asc" ? "asc" : "desc";
 
-    let userFiles = [...files.values()].filter((f) => f.user_id === userId);
-
-    // Sort
-    userFiles.sort((a, b) => {
-        const aRec: Record<string, unknown> = { ...a };
-        const bRec: Record<string, unknown> = { ...b };
-        const aVal = aRec[sort] as string | number;
-        const bVal = bRec[sort] as string | number;
-        if (aVal < bVal) return order === "asc" ? -1 : 1;
-        if (aVal > bVal) return order === "asc" ? 1 : -1;
-        return 0;
-    });
-
-    const total = userFiles.length;
-    const start = (page - 1) * perPage;
-    const paged = userFiles.slice(start, start + perPage);
+    const { files, total } = await dbListFiles(userId, page, perPage, sort, order);
 
     res.json({
-        files: paged.map((f) => ({
+        files: files.map((f) => ({
             file_id: f.file_id,
             name: f.name,
             size_bytes: f.size_bytes,
@@ -167,8 +155,8 @@ filesRouter.get("/", (req, res) => {
 
 // ── DELETE /files/:file_id ──────────────────────────────────────────────
 
-filesRouter.delete("/:file_id", (req, res) => {
-    const record = files.get(req.params.file_id);
+filesRouter.delete("/:file_id", async (req, res) => {
+    const record = await dbGetFile(req.params.file_id);
     if (!record || record.user_id !== req.auth!.user_id) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "File not found" },
@@ -176,24 +164,17 @@ filesRouter.delete("/:file_id", (req, res) => {
         return;
     }
 
-    // Check if any active task references this file
-    for (const task of tasks.values()) {
-        if (
-            task.input_file_id === record.file_id &&
-            !TERMINAL_STATUSES.has(task.status)
-        ) {
-            res.status(409).json({
-                error: { code: "CONFLICT", message: "File is in use by an active task" },
-            });
-            return;
-        }
+    if (await dbIsFileInUse(record.file_id)) {
+        res.status(409).json({
+            error: { code: "CONFLICT", message: "File is in use by an active task" },
+        });
+        return;
     }
 
-    // Remove from disk (best-effort)
     try {
         fs.unlinkSync(record.local_path);
     } catch { /* ignore */ }
 
-    files.delete(record.file_id);
+    await dbDeleteFile(record.file_id);
     res.status(204).end();
 });
