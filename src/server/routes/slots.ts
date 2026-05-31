@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { slots, tasks } from "../stores.js";
+import { slots } from "../stores.js";
+import { dbGetTask, dbUpdateTask } from "../db-helpers.js";
 
 export const slotsRouter = Router();
 
@@ -15,7 +16,7 @@ slotsRouter.get("/", (_req, res) => {
 
 // ── POST /internal/slots/:slot_id/assign ────────────────────────────────
 
-slotsRouter.post("/:slot_id/assign", (req, res) => {
+slotsRouter.post("/:slot_id/assign", async (req, res) => {
     const slot = slots.get(req.params.slot_id);
     if (!slot) {
         res.status(404).json({
@@ -32,7 +33,7 @@ slotsRouter.post("/:slot_id/assign", (req, res) => {
         return;
     }
 
-    const task = tasks.get(task_id);
+    const task = await dbGetTask(task_id);
     if (!task) {
         res.status(404).json({
             error: { code: "NOT_FOUND", message: "Task not found" },
@@ -59,8 +60,7 @@ slotsRouter.post("/:slot_id/assign", (req, res) => {
 
     slot.status = "busy";
     slot.current_task_id = task_id;
-    task.status = "assigned";
-    task.slot_id = slot.slot_id;
+    await dbUpdateTask(task_id, { status: "assigned", slot_id: slot.slot_id });
 
     res.json({ ok: true });
 });

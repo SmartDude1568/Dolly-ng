@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dolly — Log in</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="auth-page">
+        <div class="auth-card reveal">
+            <div class="frets"><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="auth-body">
+                <a class="logo auth-logo" href="index.html"><span class="dot"></span>Dolly</a>
+                <h1 id="title">Welcome back</h1>
+                <p class="sub" id="subtitle">Log in to your chart library.</p>
+
+                <div class="tabs">
+                    <button id="tab-login" class="active">Log in</button>
+                    <button id="tab-signup">Sign up</button>
+                </div>
+
+                <!-- Login -->
+                <form id="login-form">
+                    <div class="field">
+                        <label>Email</label>
+                        <input type="email" name="email" autocomplete="email" required>
+                    </div>
+                    <div class="field">
+                        <label>Password</label>
+                        <input type="password" name="password" autocomplete="current-password" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Log in</button>
+                    </div>
+                </form>
+
+                <!-- Signup -->
+                <form id="signup-form" hidden>
+                    <div class="field">
+                        <label>Display name <span class="muted">(optional)</span></label>
+                        <input type="text" name="display_name" autocomplete="nickname">
+                    </div>
+                    <div class="field">
+                        <label>Email</label>
+                        <input type="email" name="email" autocomplete="email" required>
+                    </div>
+                    <div class="field">
+                        <label>Password <span class="muted">(min 8 chars)</span></label>
+                        <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create account</button>
+                    </div>
+                </form>
+
+                <p class="form-hint"><a href="index.html">← Back home</a></p>
+            </div>
+        </div>
+    </main>
+
+    <script src="common.js"></script>
+    <script>
+        Dolly.redirectIfAuthed();
+
+        const loginForm = document.getElementById("login-form");
+        const signupForm = document.getElementById("signup-form");
+        const tabLogin = document.getElementById("tab-login");
+        const tabSignup = document.getElementById("tab-signup");
+        const title = document.getElementById("title");
+        const subtitle = document.getElementById("subtitle");
+
+        function showTab(which) {
+            const login = which === "login";
+            tabLogin.classList.toggle("active", login);
+            tabSignup.classList.toggle("active", !login);
+            loginForm.hidden = !login;
+            signupForm.hidden = login;
+            title.textContent = login ? "Welcome back" : "Join Dolly";
+            subtitle.textContent = login
+                ? "Log in to your chart library."
+                : "Create an account to start charting.";
+        }
+        tabLogin.onclick = () => showTab("login");
+        tabSignup.onclick = () => showTab("signup");
+
+        loginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+            const btn = e.target.querySelector("button");
+            btn.disabled = true;
+            try {
+                const r = await Dolly.api("/auth/login", {
+                    method: "POST", body: JSON.stringify(data),
+                });
+                Dolly.setSession(r.token, r.user_id);
+                location.href = "dashboard.html";
+            } catch (err) {
+                Dolly.toast(err.message, "error");
+                btn.disabled = false;
+            }
+        });
+
+        signupForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+            if (!data.display_name) delete data.display_name;
+            const btn = e.target.querySelector("button");
+            btn.disabled = true;
+            try {
+                await Dolly.api("/auth/register", {
+                    method: "POST", body: JSON.stringify(data),
+                });
+                // Auto-login right after registering.
+                const r = await Dolly.api("/auth/login", {
+                    method: "POST",
+                    body: JSON.stringify({ email: data.email, password: data.password }),
+                });
+                Dolly.setSession(r.token, r.user_id);
+                location.href = "dashboard.html";
+            } catch (err) {
+                Dolly.toast(err.message, "error");
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

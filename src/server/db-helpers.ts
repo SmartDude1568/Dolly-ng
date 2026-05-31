@@ -244,6 +244,27 @@ export async function dbUpdateConversionStatus(
     await sql`UPDATE conversions SET status = ${status} WHERE conversion_id = ${conversionId}`;
 }
 
+/** Full task records (not just summaries) for a conversion, in pipeline order. */
+export async function dbGetConversionTaskRecords(conversionId: string): Promise<TaskRecord[]> {
+    const rows = await sql`
+        SELECT t.* FROM tasks t
+        JOIN conversion_tasks ct ON ct.task_id = t.task_id
+        WHERE ct.conversion_id = ${conversionId}
+        ORDER BY t.created_at
+    `;
+    return rows.map(rowToTask);
+}
+
+/** All conversions in a given status (across users) — used by startup resume. */
+export async function dbListConversionsByStatus(
+    status: ConversionStatus,
+): Promise<ConversionRecord[]> {
+    const rows = await sql`
+        SELECT * FROM conversions WHERE status = ${status} ORDER BY created_at
+    `;
+    return rows.map(rowToConversion);
+}
+
 export async function dbListConversions(
     userId: string,
     page: number,

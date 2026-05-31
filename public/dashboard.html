@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dolly — Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="frets"><span></span><span></span><span></span><span></span><span></span></div>
+
+    <nav class="nav">
+        <a class="logo" href="index.html"><span class="dot"></span>Dolly</a>
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="dashboard.html" class="active">Dashboard</a>
+        </div>
+        <span class="nav-spacer"></span>
+        <span class="nav-user" id="nav-user"></span>
+        <button class="btn btn-ghost btn-sm" id="logout">Log out</button>
+    </nav>
+
+    <main class="dash">
+        <div class="wrap">
+            <header class="dash-head reveal">
+                <div>
+                    <h1>Your studio</h1>
+                    <p>Upload songs, generate charts, and grab the finished <span class="mono">.sng</span>.</p>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="refresh-all">↻ Refresh</button>
+            </header>
+
+            <div class="dash-grid">
+                <!-- LEFT: actions -->
+                <div>
+                    <!-- Upload -->
+                    <section class="panel reveal" style="animation-delay:.05s">
+                        <div class="panel-head"><h2>Upload</h2></div>
+                        <div class="panel-body">
+                            <form id="upload-form">
+                                <label class="dropzone" id="dropzone">
+                                    <strong>Drop an audio file</strong> or <span class="pick">browse</span>
+                                    <br><span class="muted" style="font-size:13px">WAV · MP3 · FLAC · OGG</span>
+                                    <span class="file-name" id="file-name"></span>
+                                    <input type="file" name="file" accept="audio/*" required>
+                                </label>
+                                <div class="field" style="margin-top:14px">
+                                    <label>Name <span class="muted">(optional)</span></label>
+                                    <input type="text" name="name" placeholder="defaults to filename">
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary" id="upload-btn">Upload song</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
+
+                    <!-- Start conversion -->
+                    <section class="panel reveal" style="animation-delay:.1s">
+                        <div class="panel-head"><h2>New chart</h2></div>
+                        <div class="panel-body">
+                            <form id="conversion-form">
+                                <div class="field">
+                                    <label>Source song</label>
+                                    <select name="input_file_id" id="source-select" required>
+                                        <option value="">— upload a song first —</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label>Instruments</label>
+                                    <div class="checkboxes">
+                                        <label><input type="checkbox" name="instruments" value="guitar" checked> Guitar</label>
+                                        <label><input type="checkbox" name="instruments" value="bass" checked> Bass</label>
+                                        <label><input type="checkbox" name="instruments" value="drums" checked> Drums</label>
+                                        <label><input type="checkbox" name="instruments" value="keys"> Keys</label>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label>Difficulty</label>
+                                    <select name="difficulty">
+                                        <option value="easy">Easy</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="hard">Hard</option>
+                                        <option value="expert" selected>Expert</option>
+                                    </select>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary" id="convert-btn">Generate chart</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- RIGHT: file explorer -->
+                <section class="panel reveal" style="animation-delay:.15s">
+                    <div class="panel-head">
+                        <div class="segmented" id="segmented">
+                            <button data-view="charts" class="active">Charts <span class="count" id="count-charts">0</span></button>
+                            <button data-view="songs">Songs <span class="count" id="count-songs">0</span></button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="explorer" id="explorer"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script src="common.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+</html>

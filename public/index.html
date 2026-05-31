@@ -2,92 +2,101 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Dolly</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dolly — Audio to Clone Hero charts</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Dolly</h1>
-    <p>Generate Clone Hero charts from audio files.</p>
+    <div class="frets"><span></span><span></span><span></span><span></span><span></span></div>
 
-    <div id="status-bar">
-        <span id="auth-status">Not logged in</span>
-        <button id="logout-btn" hidden>Log out</button>
-    </div>
-
-    <!-- Auth section -->
-    <section id="auth-section">
-        <h2>Register</h2>
-        <form id="register-form">
-            <label>Email <input type="email" name="email" required></label>
-            <label>Password <input type="password" name="password" minlength="8" required></label>
-            <label>Display name <input type="text" name="display_name"></label>
-            <button type="submit">Register</button>
-        </form>
-
-        <h2>Log in</h2>
-        <form id="login-form">
-            <label>Email <input type="email" name="email" required></label>
-            <label>Password <input type="password" name="password" required></label>
-            <button type="submit">Log in</button>
-        </form>
-    </section>
-
-    <!-- Main app section -->
-    <section id="app-section" hidden>
-        <h2>Upload audio file</h2>
-        <form id="upload-form">
-            <label>Audio file <input type="file" name="file" accept="audio/*" required></label>
-            <label>Name <input type="text" name="name"></label>
-            <button type="submit">Upload</button>
-        </form>
-
-        <h2>Your files</h2>
-        <button id="refresh-files">Refresh</button>
-        <ul id="file-list"></ul>
-
-        <h2>Start conversion</h2>
-        <form id="conversion-form">
-            <label>File ID <input type="text" name="input_file_id" required></label>
-            <label>Instruments (comma-separated) <input type="text" name="instruments" value="guitar,bass,drums"></label>
-            <label>Difficulty
-                <select name="difficulty">
-                    <option value="easy">Easy</option>
-                    <option value="medium">Medium</option>
-                    <option value="hard">Hard</option>
-                    <option value="expert" selected>Expert</option>
-                </select>
-            </label>
-            <button type="submit">Start conversion</button>
-        </form>
-
-        <h2>Your conversions</h2>
-        <button id="refresh-conversions">Refresh</button>
-        <ul id="conversion-list"></ul>
-    </section>
-
-    <!-- Chart generation (Modal-backed audio2chart) -->
-    <section id="chart-section">
-        <h2>Generate chart from audio</h2>
-        <p>Drops the audio straight into the Modal-hosted audio2chart pipeline. Audio must be at least 30 seconds.</p>
-        <form id="chart-form">
-            <label>Audio file <input type="file" name="audio" accept="audio/*" required></label>
-            <label>Song name <input type="text" name="name" placeholder="(optional)"></label>
-            <label>Artist <input type="text" name="artist" placeholder="(optional)"></label>
-            <label>Temperature <input type="number" name="temperature" step="0.1" min="0" max="2" value="0.5"></label>
-            <label>Top-k <input type="number" name="top_k" min="0" value="32"></label>
-            <button type="submit">Generate chart</button>
-        </form>
-
-        <div id="chart-job" hidden>
-            <p id="chart-stage">Queued…</p>
-            <progress id="chart-progress" value="0" max="1"></progress>
-            <p id="chart-progress-text"></p>
-            <p id="chart-result"></p>
+    <nav class="nav">
+        <a class="logo" href="index.html"><span class="dot"></span>Dolly</a>
+        <span class="nav-spacer"></span>
+        <div class="nav-links" id="nav-links">
+            <a href="index.html" class="active">Home</a>
+            <a href="auth.html">Log in</a>
+            <a href="dashboard.html" class="btn btn-primary btn-sm">Open app</a>
         </div>
-    </section>
+    </nav>
 
-    <div id="message"></div>
+    <main>
+        <section class="hero">
+            <div class="highway" id="highway"></div>
+            <div class="hero-inner">
+                <span class="eyebrow reveal">Audio → playable charts</span>
+                <h1 class="reveal" style="animation-delay:.05s">
+                    Turn any song<br>into a <em>shredfest</em>
+                </h1>
+                <p class="lead reveal" style="animation-delay:.12s">
+                    Dolly splits a track into stems, runs each through the audio2chart
+                    model, merges the notes, and packages a ready-to-play Clone Hero
+                    <span class="mono">.sng</span> — all from one upload.
+                </p>
+                <div class="hero-cta reveal" style="animation-delay:.18s">
+                    <a href="auth.html" class="btn btn-primary">Start charting →</a>
+                    <a href="#how" class="btn btn-ghost">How it works</a>
+                </div>
+            </div>
+        </section>
 
-    <script src="app.js"></script>
+        <div class="wrap" id="how">
+            <div class="feature-grid">
+                <div class="feature">
+                    <span class="num">01 — Upload</span>
+                    <h3>Drop a track</h3>
+                    <p>WAV, MP3, FLAC or OGG. Your songs live in a private library you can convert again any time.</p>
+                </div>
+                <div class="feature">
+                    <span class="num">02 — Generate</span>
+                    <h3>Pick instruments</h3>
+                    <p>Guitar, bass, drums, keys. Stems are split with LALAL.ai and charted on a Modal GPU.</p>
+                </div>
+                <div class="feature">
+                    <span class="num">03 — Play</span>
+                    <h3>Download the .sng</h3>
+                    <p>A real Clone Hero archive with Opus audio. Drop it in your songs folder and rock out.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        Dolly · generates Guitar Hero / Clone Hero charts from audio.
+    </footer>
+
+    <script src="common.js"></script>
+    <script>
+        // Adjust nav for logged-in users.
+        if (Dolly.getToken()) {
+            const links = document.getElementById("nav-links");
+            links.innerHTML =
+                '<a href="index.html" class="active">Home</a>' +
+                '<a href="dashboard.html">Dashboard</a>' +
+                '<a href="#" id="logout">Log out</a>';
+            document.getElementById("logout").onclick = async (e) => {
+                e.preventDefault();
+                try { await Dolly.api("/auth/logout", { method: "POST" }); } catch {}
+                Dolly.clearSession();
+                location.reload();
+            };
+        }
+
+        // Build the descending-note highway behind the hero.
+        const hw = document.getElementById("highway");
+        for (let i = 0; i < 5; i++) {
+            const lane = document.createElement("div");
+            lane.className = "lane";
+            const count = 2 + Math.floor(Math.random() * 2);
+            for (let n = 0; n < count; n++) {
+                const note = document.createElement("div");
+                note.className = "note";
+                const dur = 3.4 + Math.random() * 2.6;
+                note.style.animationDuration = dur + "s";
+                note.style.animationDelay = (-Math.random() * dur) + "s";
+                lane.appendChild(note);
+            }
+            hw.appendChild(lane);
+        }
+    </script>
 </body>
 </html>

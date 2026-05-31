@@ -4,7 +4,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ModalAudio2Chart, type ProgressEvent } from "../../chart/modal.js";
+import { Audio2ChartModal } from "../../chart/audio2chart.js";
+import type { ProgressEvent } from "../../chart/modal.js";
 
 /**
  * Chart generation route backed by the Modal-hosted audio2chart service.
@@ -70,16 +71,10 @@ chartsRouter.post("/", upload.single("audio"), (req, res) => {
         return;
     }
 
-    const generateUrl = process.env.MODAL_GENERATE_URL;
-    const statusUrl = process.env.MODAL_STATUS_URL;
+    const generateUrl =
+        process.env.MODAL_GENERATE_URL ??
+        "https://melvillevt--audio2chart-generate.modal.run";
     const token = process.env.AUDIO2CHART_TOKEN;
-    if (!generateUrl || !statusUrl || !token) {
-        res.status(500).json({
-            error:
-                "Modal backend not configured. Set MODAL_GENERATE_URL, MODAL_STATUS_URL and AUDIO2CHART_TOKEN.",
-        });
-        return;
-    }
 
     // Optional opts JSON forwarded to the Modal function.
     let opts: Record<string, unknown> = {};
@@ -112,12 +107,11 @@ chartsRouter.post("/", upload.single("audio"), (req, res) => {
     // Run in background — same fire-and-forget pattern as legacy /split.
     (async () => {
         job.status = "processing";
+        job.progress = { stage: "generating", step: 0, total: 0 };
 
-        const client = new ModalAudio2Chart({
-            generateUrl,
-            statusUrl,
+        const client = new Audio2ChartModal({
+            endpointUrl: generateUrl,
             token,
-            outputDir,
             modelName: opts.model_name as string | undefined,
             temperature: opts.temperature as number | undefined,
             topK: opts.top_k as number | undefined,
@@ -128,13 +122,10 @@ chartsRouter.post("/", upload.single("audio"), (req, res) => {
             charter: opts.charter as string | undefined,
             bpm: opts.bpm as number | undefined,
             resolution: opts.resolution as number | undefined,
-            onProgress: (p) => {
-                job.progress = p;
-            },
         });
 
         try {
-            const result = await client.generate(req.file!.path);
+            const result = await client.generate(req.file!.path, outputDir);
             job.chartPath = result.chartPath;
             job.status = "complete";
         } catch (err) {

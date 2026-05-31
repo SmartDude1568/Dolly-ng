@@ -34,8 +34,9 @@ Express server exposing the design-doc REST API plus legacy `/split` and `/jobs`
 - `src/chart/parse.ts` - `.chart` file parser
 - `src/chart/write.ts` - `.chart` file writer/serializer
 - `src/chart/merge.ts` - Multi-chart merger (first-wins / last-wins / error strategies)
-- `src/chart/modal.ts` - Client for the Modal-hosted GPU audio2chart service
-- `src/sng.ts` - SNG binary archive packer (`packSng`, `packSngFromDir`, `writeSngFromDir`)
+- `src/chart/modal.ts` - Spawn/poll client for a Modal deployment (legacy shape; not the live endpoint)
+- `src/chart/audio2chart.ts` - **One-shot** client matching the live Modal endpoint (POST `audio` → `.chart` bytes). Used by the worker and `/charts`
+- `src/sng.ts` - SNG binary archive packer (`packSng`, `packSngFromDir`, `writeSngFromDir`). Implements the real mdsitton SNG spec: `SNGPKG` + uint32 version + 16-byte xorMask, sections metadata→fileindex→filedata, **absolute** `contentsIndex`, masking `xorMask[i%16] ^ (i&0xFF)` (per-file index)
 - `src/clonehero.ts` - Clone Hero installation detection (`findCloneHeroSongsDir`, `installSng`)
 
 ### API Server modules (`src/server/`)
@@ -44,12 +45,13 @@ Express server exposing the design-doc REST API plus legacy `/split` and `/jobs`
 - `middleware.ts` - `requireAuth` Bearer-token middleware (validates against Neon sessions table)
 - `stores.ts` - In-memory slot store (slots are live compute resources, not persisted)
 - `types.ts` - Shared TypeScript types matching the design-doc API contract
+- `worker.ts` - In-process conversion pipeline: LALAL split → per-stem audio2chart (Modal) → section remap → merge → transcode audio to Opus (ffmpeg) → pack `.sng` → store output; updates task/conversion rows as it goes
 - `routes/auth.ts` - POST /auth/register, /auth/login, /auth/logout (Neon DB backed)
 - `routes/files.ts` - CRUD for uploaded audio files (Neon DB backed)
 - `routes/tasks.ts` - Task lifecycle management (Neon DB backed)
-- `routes/conversions.ts` - Full-pipeline conversion orchestration (Neon DB backed)
-- `routes/slots.ts` - Internal slot assignment/release (in-memory)
-- `routes/charts.ts` - Modal-backed chart generation job routes
+- `routes/conversions.ts` - Full-pipeline conversion orchestration; starts the worker on POST, serves the packaged `.sng` at `GET /v1/conversions/:id/download`
+- `routes/slots.ts` - Internal slot assignment/release (in-memory + DB task lookups)
+- `routes/charts.ts` - Modal-backed chart generation job routes (one-shot `Audio2ChartModal`)
 
 ### Database (`db/`)
 - `schema.sql` - Idempotent DDL for all tables (users, sessions, files, tasks, conversions, conversion_tasks)
@@ -71,15 +73,19 @@ Express server exposing the design-doc REST API plus legacy `/split` and `/jobs`
 - **typescript** (^5.9.3) - TypeScript compiler
 - **@types/node** (^25.0.9) - Node.js type definitions
 - **tsx** (^4.19.0) - TypeScript execution engine for tests and CLI
+- **dotenv** - Loads `.env` (imported at the top of `src/index.ts`; `.env` was previously never loaded)
+- **ffmpeg-static** - Bundled ffmpeg binary; worker transcodes audio to Opus for Clone Hero
+- **playwright** (dev) - Drives the browser end-to-end test (`tests/browser-e2e.ts`)
 
 ## Key Patterns
 
 - Splitters implement `StemSplitter<S>` interface; `CachedSplitter` is a decorator
-- Tests are plain TypeScript files run via `tsx` (no Jest/Vitest)
+- Tests are plain TypeScript files run via `tsx` (no Jest/Vitest). Browser e2e: `npx tsx tests/browser-e2e.ts` (needs the server running + `LALAL_API_KEY`)
 - ESM modules (`"type": "module"` in package.json, `.js` import extensions)
 - API routes are async Express 5 handlers (errors propagate automatically)
 - Auth uses opaque bearer tokens stored in the Neon `sessions` table
-- SNG format: binary container with XOR-masked file data and JSON metadata
+- SNG format: real Clone Hero `.sng` (mdsitton spec) — see `src/sng.ts`. Audio **must be Opus/OGG**; CH's BASS rejects MP3 with a `FileFormat` error
+- Conversion instrument→stem→track map (worker): guitar→`electric_guitar`→`Single`, bass→`bass`→`DoubleBass`, drums→`drum`→`Drums`, keys→`piano`→`Keyboard`. audio2chart only emits `ExpertSingle`, remapped per instrument/difficulty
 
 ## Auto-Update Instructions
 

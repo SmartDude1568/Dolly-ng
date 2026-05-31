@@ -1,3 +1,4 @@
+import "dotenv/config";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -17,6 +18,7 @@ import { tasksRouter } from "./server/routes/tasks.js";
 import { conversionsRouter } from "./server/routes/conversions.js";
 import { slotsRouter } from "./server/routes/slots.js";
 import { chartsRouter } from "./server/routes/charts.js";
+import { resumeInterruptedConversions } from "./server/resume.js";
 
 // ---------------------------------------------------------------------------
 // Legacy job store (kept for backwards compat with /split + /jobs)
@@ -206,4 +208,9 @@ app.listen(PORT, () => {
     console.log(`Dolly API listening on :${PORT}`);
     console.log(`  v1 endpoints: /v1/auth, /v1/files, /v1/tasks, /v1/conversions`);
     console.log(`  legacy:       /split, /jobs/:id`);
+
+    // Re-launch any conversion that was interrupted by a previous shutdown.
+    resumeInterruptedConversions().catch((err) => {
+        console.error("[startup] resume sweep failed:", err);
+    });
 });
