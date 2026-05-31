@@ -22,7 +22,7 @@ import { createRequire } from "node:module";
 
 import { LalalSplitter, type LalalStem } from "../split/lalal.js";
 import { Audio2ChartModal } from "../chart/audio2chart.js";
-import { parseChart, type Chart, type ChartSection } from "../chart/parse.js";
+import { parseChart, type Chart, type ChartSection, type TrackEvent } from "../chart/parse.js";
 import { writeChart } from "../chart/write.js";
 import { mergeCharts } from "../chart/merge.js";
 import { packSng, type SngEntry } from "../sng.js";
@@ -244,7 +244,9 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
             }
 
             const chart = parseChart(text);
-            perInstrumentCharts.push(remapChartTracks(chart, `${diffPrefix}${entry.section}`));
+            perInstrumentCharts.push(
+                remapChartTracks(chart, `${diffPrefix}${entry.section}`, entry.section === "Drums"),
+            );
         }
 
         if (perInstrumentCharts.length === 0) {
@@ -353,14 +355,21 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
  * Rebuild a chart so every instrument track is renamed to `targetSection`.
  * audio2chart always emits a single [ExpertSingle] track; this places it on
  * the correct Clone Hero instrument/difficulty.
+ *
+ * When `drums` is set the note lanes are also translated from 5-lane guitar
+ * semantics to drum semantics (see {@link remapDrumEvent}). This is required:
+ * Clone Hero silently refuses to load a drums track that contains illegal
+ * lanes (the guitar open note 7 / force 5 / tap 6 markers), so a verbatim
+ * copy of the guitar chart leaves the song with no playable drums at all.
  */
-function remapChartTracks(chart: Chart, targetSection: string): Chart {
+function remapChartTracks(chart: Chart, targetSection: string, drums = false): Chart {
     const tracks = new Map<string, ChartSection>();
     // Prefer an ExpertSingle source; otherwise take the first available track.
     const source =
         chart.tracks.get("ExpertSingle") ?? [...chart.tracks.values()][0];
     if (source) {
-        tracks.set(targetSection, { name: targetSection, events: source.events });
+        const events = drums ? source.events.flatMap(remapDrumEvent) : source.events;
+        tracks.set(targetSection, { name: targetSection, events });
     }
     return {
         song: chart.song,
@@ -368,6 +377,37 @@ function remapChartTracks(chart: Chart, targetSection: string): Chart {
         events: chart.events,
         tracks,
     };
+}
+
+/**
+ * 5-lane-guitar fret/marker → Clone Hero drum lane.
+ *
+ * audio2chart only emits guitar notes (0-4 frets, plus 5 force / 6 tap / 7
+ * open markers). On a drums track the only legal note values are 0 (kick) and
+ * 1-4 (the pads), so the frets are shifted onto the pads, open strums become
+ * the kick, and the HOPO force/tap markers — meaningless for drums — are
+ * dropped. `null` means "drop this note entirely".
+ */
+const GUITAR_TO_DRUM_LANE: Record<string, string | null> = {
+    "0": "1", // green  → red pad
+    "1": "2", // red    → yellow pad
+    "2": "3", // yellow → blue pad
+    "3": "4", // blue   → green pad
+    "4": "4", // orange → green pad (5-lane drums are uncommon; collapse onto 4)
+    "5": null, // force marker — illegal on drums
+    "6": null, // tap marker   — illegal on drums
+    "7": "0", // open   → kick
+};
+
+/** Translate one [ExpertSingle] event onto a drums track. */
+function remapDrumEvent(ev: TrackEvent): TrackEvent[] {
+    // Pass non-note events through untouched (S = star power, E = text, etc.).
+    if (ev.typeCode !== "N") return [ev];
+    const lane = ev.values[0];
+    const mapped = lane !== undefined ? GUITAR_TO_DRUM_LANE[lane] : undefined;
+    if (mapped === null) return []; // drop force/tap modifiers
+    if (mapped === undefined) return [ev]; // unknown lane — leave as-is
+    return [{ position: ev.position, typeCode: "N", values: [mapped, ev.values[1] ?? "0"] }];
 }
 
 async function setTask(task: TaskRecord, status: TaskStatus, progress: number): Promise<void> {
