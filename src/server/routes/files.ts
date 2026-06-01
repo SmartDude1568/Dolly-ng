@@ -11,7 +11,9 @@ import {
     dbListFiles,
     dbDeleteFile,
     dbIsFileInUse,
+    dbUpdateFileBpm,
 } from "../db-helpers.js";
+import { detectBpm } from "../../bpm.js";
 import type { FileRecord } from "../types.js";
 
 export const filesRouter = Router();
@@ -65,6 +67,20 @@ filesRouter.post("/upload", upload.single("file"), async (req, res) => {
 
     const name = (req.body.name as string | undefined) ?? req.file.originalname;
 
+    // Detect the tempo up front so the dashboard can seed its metronome the
+    // moment the upload returns. A detection failure must not fail the upload —
+    // the user can still set the BPM by hand via PATCH.
+    let bpm: number | null = null;
+    try {
+        const result = await detectBpm(req.file.path);
+        bpm = result.bpm;
+    } catch (err) {
+        console.warn(
+            `[files] BPM detection failed for ${req.file.originalname}:`,
+            err instanceof Error ? err.message : err,
+        );
+    }
+
     const record: FileRecord = {
         file_id: `file_${crypto.randomUUID().slice(0, 8)}`,
         user_id: req.auth!.user_id,
@@ -72,6 +88,7 @@ filesRouter.post("/upload", upload.single("file"), async (req, res) => {
         size_bytes: req.file.size,
         mime_type: req.file.mimetype,
         created_at: new Date().toISOString(),
+        bpm,
         local_path: req.file.path,
     };
 
@@ -82,6 +99,54 @@ filesRouter.post("/upload", upload.single("file"), async (req, res) => {
         name: record.name,
         size_bytes: record.size_bytes,
         mime_type: record.mime_type,
+        bpm: record.bpm,
+        created_at: record.created_at,
+    });
+});
+
+// ── PATCH /files/:file_id ───────────────────────────────────────────────
+// Update the confirmed tempo after the user verifies it against the metronome.
+
+filesRouter.patch("/:file_id", async (req, res) => {
+    const record = await dbGetFile(req.params.file_id);
+    if (!record || record.user_id !== req.auth!.user_id) {
+        res.status(404).json({
+            error: { code: "NOT_FOUND", message: "File not found" },
+        });
+        return;
+    }
+
+    const { bpm } = req.body as { bpm?: unknown };
+    if (bpm === undefined) {
+        res.status(400).json({
+            error: { code: "BAD_REQUEST", message: "Nothing to update (expected: bpm)" },
+        });
+        return;
+    }
+
+    let value: number | null;
+    if (bpm === null) {
+        value = null;
+    } else {
+        const n = Number(bpm);
+        if (!Number.isFinite(n) || n <= 0 || n > 400) {
+            res.status(400).json({
+                error: { code: "BAD_REQUEST", message: "bpm must be a number between 1 and 400, or null" },
+            });
+            return;
+        }
+        // Allow fractional BPM but keep it tidy.
+        value = Math.round(n * 100) / 100;
+    }
+
+    await dbUpdateFileBpm(record.file_id, value);
+
+    res.json({
+        file_id: record.file_id,
+        name: record.name,
+        size_bytes: record.size_bytes,
+        mime_type: record.mime_type,
+        bpm: value,
         created_at: record.created_at,
     });
 });
@@ -102,6 +167,8 @@ filesRouter.get("/:file_id", async (req, res) => {
         name: record.name,
         size_bytes: record.size_bytes,
         mime_type: record.mime_type,
+        bpm: record.bpm ?? null,
+        kind: record.kind ?? "source",
         created_at: record.created_at,
         download_url: `/v1/files/${record.file_id}/download`,
     });
@@ -145,6 +212,8 @@ filesRouter.get("/", async (req, res) => {
             name: f.name,
             size_bytes: f.size_bytes,
             mime_type: f.mime_type,
+            bpm: f.bpm ?? null,
+            kind: f.kind ?? "source",
             created_at: f.created_at,
         })),
         total,

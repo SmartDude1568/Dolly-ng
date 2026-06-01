@@ -27,6 +27,14 @@ export interface FileRecord {
     size_bytes: number;
     mime_type: string;
     created_at: string;
+    /** Detected or user-confirmed tempo in BPM; null until analysed. */
+    bpm?: number | null;
+    /**
+     * 'source' = uploaded audio the user can chart; 'output' = a generated
+     * artifact (e.g. the packaged .sng). Only 'source' files are listed as
+     * songs and offered as conversion inputs. Defaults to 'source'.
+     */
+    kind?: "source" | "output";
     /** Internal: path on disk where the file is stored. */
     local_path: string;
 }

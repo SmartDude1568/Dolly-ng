@@ -141,6 +141,8 @@ export interface RunConversionArgs {
     inputFile: FileRecord;
     instruments: string[];
     difficulty: string;
+    /** Confirmed tempo for the song; forwarded to audio2chart for timing. */
+    bpm?: number | null;
 }
 
 /** Fire-and-forget entry point — never throws to the caller. */
@@ -155,6 +157,9 @@ export function startConversion(args: RunConversionArgs): void {
 
 export async function runConversion(args: RunConversionArgs): Promise<void> {
     const { conversion, tasks, inputFile, instruments, difficulty } = args;
+    // A confirmed tempo (>0) drives audio2chart's note timing and the final
+    // SyncTrack; fall back to the file's stored BPM if the caller omitted it.
+    const bpm = normalizeBpm(args.bpm ?? inputFile.bpm);
     const convId = conversion.conversion_id;
     const log = (msg: string) => console.log(`[worker ${convId}] ${msg}`);
 
@@ -204,11 +209,13 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         }
 
         // ── 2. audio2chart per instrument ────────────────────────────────
+        if (bpm) log(`using tempo ${bpm} BPM for chart timing`);
         const modal = new Audio2ChartModal({
             endpointUrl: MODAL_URL,
             token: process.env.AUDIO2CHART_TOKEN,
             artist: "Dolly",
             charter: "Dolly",
+            bpm: bpm ?? undefined,
         });
         const diffPrefix = DIFFICULTY_PREFIX[difficulty.toLowerCase()] ?? "Expert";
         const perInstrumentCharts: Chart[] = [];
@@ -263,6 +270,10 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         merged.song.Artist = "Dolly";
         merged.song.Charter = "Dolly (audio2chart)";
         merged.song.MusicStream = "song.opus";
+
+        // Guarantee the final SyncTrack tempo matches the BPM we charted with,
+        // so Clone Hero plays the notes at the speed the user confirmed.
+        if (bpm) enforceTempo(merged, bpm);
 
         const notesChart = writeChart(merged);
         fs.writeFileSync(path.join(workDir, "notes.chart"), notesChart, "utf8");
@@ -328,6 +339,8 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
             name: sngName,
             size_bytes: sngBuf.length,
             mime_type: "application/octet-stream",
+            // Generated artifact — not a chartable source song.
+            kind: "output",
             local_path: sngPath,
             created_at: new Date().toISOString(),
         };
@@ -408,6 +421,37 @@ function remapDrumEvent(ev: TrackEvent): TrackEvent[] {
     if (mapped === null) return []; // drop force/tap modifiers
     if (mapped === undefined) return [ev]; // unknown lane — leave as-is
     return [{ position: ev.position, typeCode: "N", values: [mapped, ev.values[1] ?? "0"] }];
+}
+
+/** Coerce a possibly-null/garbage BPM into a usable number, or null. */
+function normalizeBpm(bpm: number | null | undefined): number | null {
+    if (bpm == null) return null;
+    const n = Number(bpm);
+    if (!Number.isFinite(n) || n <= 0 || n > 400) return null;
+    return n;
+}
+
+/**
+ * Force the chart to a single constant tempo. audio2chart charts notes against
+ * one fixed BPM, so the SyncTrack should declare exactly that: we drop any
+ * tempo (`B`) events the model emitted and anchor one at position 0. Time
+ * signature and other sync events are preserved. `.chart` encodes BPM as
+ * milli-BPM (BPM × 1000), e.g. 120 BPM → `0 = B 120000`.
+ */
+function enforceTempo(chart: Chart, bpm: number): void {
+    const milliBpm = String(Math.round(bpm * 1000));
+    const kept = chart.syncTrack.events.filter((e) => e.typeCode !== "B");
+    const hasTimeSig = kept.some((e) => e.typeCode === "TS" && e.position === 0);
+    const seed: TrackEvent[] = [{ position: 0, typeCode: "B", values: [milliBpm] }];
+    if (!hasTimeSig) {
+        // A chart with a tempo but no time signature is malformed for some
+        // parsers; default to 4/4 if the model omitted one.
+        seed.unshift({ position: 0, typeCode: "TS", values: ["4"] });
+    }
+    chart.syncTrack = {
+        name: chart.syncTrack.name,
+        events: [...seed, ...kept],
+    };
 }
 
 async function setTask(task: TaskRecord, status: TaskStatus, progress: number): Promise<void> {

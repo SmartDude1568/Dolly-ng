@@ -5,10 +5,11 @@
  * Usage:
  *   npx tsx db/migrate.ts
  *
- * Reads DATABASE_URL from the environment (or falls back to the default in
- * src/server/db.ts).  The schema is idempotent — safe to run multiple times.
+ * Requires DATABASE_URL in the environment (see .env / .env.example).
+ * The schema is idempotent — safe to run multiple times.
  */
 
+import "dotenv/config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,9 +17,13 @@ import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DATABASE_URL =
-    process.env.DATABASE_URL ??
-    "postgresql://neondb_owner:npg_YHcEx34sgUik@ep-old-sun-anu91iem.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+    throw new Error(
+        "DATABASE_URL is not set. Provide the Neon connection string via the environment (see .env.example).",
+    );
+}
 
 const sql = neon(DATABASE_URL);
 

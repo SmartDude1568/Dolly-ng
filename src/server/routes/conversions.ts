@@ -47,6 +47,17 @@ conversionsRouter.post("/", async (req, res) => {
         return;
     }
 
+    // Generated artifacts (e.g. a packaged .sng) are not chartable source audio.
+    if (file.kind === "output") {
+        res.status(422).json({
+            error: {
+                code: "INVALID_INPUT",
+                message: "This file is a generated output, not a source song; choose an uploaded audio file",
+            },
+        });
+        return;
+    }
+
     const userId = req.auth!.user_id;
     const now = new Date().toISOString();
 
@@ -109,6 +120,7 @@ conversionsRouter.post("/", async (req, res) => {
         inputFile: file,
         instruments,
         difficulty,
+        bpm: file.bpm ?? null,
     });
 
     res.status(201).json(publicConversion(record));

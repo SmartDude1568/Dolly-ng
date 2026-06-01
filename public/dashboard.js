@@ -43,6 +43,8 @@ uploadForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!fileInput.files[0]) { Dolly.toast("Pick a file first", "error"); return; }
     const btn = document.getElementById("upload-btn");
+    // Keep the local File so the tempo metronome can play it without a re-fetch.
+    const localFile = fileInput.files[0];
     const form = new FormData(uploadForm);
     if (!form.get("name")) form.delete("name");
     btn.disabled = true;
@@ -55,6 +57,14 @@ uploadForm.addEventListener("submit", async (e) => {
         await refreshFiles();
         // Pre-select the freshly uploaded song in the conversion form.
         document.getElementById("source-select").value = r.file_id;
+        // Let the user verify the detected tempo against a metronome.
+        Dolly.openTempo({
+            fileId: r.file_id,
+            name: r.name,
+            bpm: r.bpm,
+            source: localFile,
+            onSaved: () => refreshFiles(),
+        });
     } catch (err) {
         Dolly.toast(err.message, "error");
     } finally {
@@ -164,14 +174,18 @@ function render() {
 }
 
 function songRow(f) {
+    const bpm = f.bpm != null
+        ? `<span class="bpm-tag">${Math.round(f.bpm)} BPM</span>`
+        : `<span class="bpm-tag muted">tempo not set</span>`;
     return `
         <div class="row">
             <div class="row-icon">🎵</div>
             <div class="row-main">
                 <div class="name">${Dolly.esc(f.name)}</div>
-                <div class="meta">${Dolly.bytes(f.size_bytes)} · ${Dolly.esc(f.mime_type)} · ${Dolly.timeAgo(f.created_at)}</div>
+                <div class="meta">${Dolly.bytes(f.size_bytes)} · ${Dolly.esc(f.mime_type)} · ${Dolly.timeAgo(f.created_at)} · ${bpm}</div>
             </div>
             <div class="row-actions">
+                <button class="btn btn-ghost btn-sm" data-tempo-file="${f.file_id}" data-name="${Dolly.esc(f.name)}" data-bpm="${f.bpm ?? ""}">Tempo</button>
                 <button class="btn btn-ghost btn-sm" data-dl-file="${f.file_id}" data-name="${Dolly.esc(f.name)}">Download</button>
                 <button class="btn btn-ghost btn-sm" data-del-file="${f.file_id}">Delete</button>
             </div>
@@ -205,6 +219,24 @@ function chartRow(c) {
 
 function wireRowActions() {
     const el = document.getElementById("explorer");
+    el.querySelectorAll("[data-tempo-file]").forEach((b) => b.onclick = async () => {
+        b.disabled = true;
+        try {
+            // Fetch the stored audio so the metronome can play it.
+            const blob = await Dolly.fetchBlob(`/v1/files/${b.dataset.tempoFile}/download`);
+            Dolly.openTempo({
+                fileId: b.dataset.tempoFile,
+                name: b.dataset.name,
+                bpm: b.dataset.bpm ? Number(b.dataset.bpm) : null,
+                source: blob,
+                onSaved: () => refreshFiles(),
+            });
+        } catch (err) {
+            Dolly.toast(err.message, "error");
+        } finally {
+            b.disabled = false;
+        }
+    });
     el.querySelectorAll("[data-dl-file]").forEach((b) => b.onclick = async () => {
         try {
             await Dolly.download(`/v1/files/${b.dataset.dlFile}/download`, b.dataset.name);

@@ -9,6 +9,7 @@ vendor/
 # credentials and local config
 .env
 .env.*
+!.env.example
 .claude/settings.local.json
 
 # python bytecode
@@ -17,6 +18,7 @@ modal/__pycache__/
 *.pyc
 
 # experimental local test scripts
+modal/
 modaltest/
 modaltest.*
 

@@ -70,6 +70,7 @@ export async function resumeConversion(conversionId: string): Promise<boolean> {
         inputFile,
         instruments: deriveInstruments(tasks),
         difficulty: deriveDifficulty(tasks),
+        bpm: inputFile.bpm ?? null,
     });
     return true;
 }

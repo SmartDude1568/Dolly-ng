@@ -655,3 +655,136 @@ footer {
 /* staggered entrance */
 .reveal { opacity: 0; transform: translateY(14px); animation: rise 0.55s ease forwards; }
 @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+/* ── BPM tag on song rows ────────────────────────────────────────────── */
+.bpm-tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+}
+.bpm-tag.muted { color: var(--text-faint); }
+
+/* ── Modal overlay ───────────────────────────────────────────────────── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(5, 5, 9, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: fadeIn 0.18s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal {
+    position: relative;
+    width: 100%;
+    max-width: 440px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bold);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 30px 28px 24px;
+    animation: rise 0.28s ease forwards;
+}
+.modal-close {
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 14px;
+}
+.modal-close:hover { color: var(--text); border-color: var(--text-faint); }
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 22px;
+}
+.modal-actions .btn { flex: 1; }
+
+/* ── Metronome ───────────────────────────────────────────────────────── */
+.metro-title {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 24px;
+}
+.metro-sub { color: var(--text-dim); font-size: 14px; margin-top: 2px; }
+
+.metro-beats {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin: 26px 0 22px;
+}
+.metro-beats .beat {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-bold);
+    transition: transform 0.08s ease, background 0.08s ease, box-shadow 0.08s ease;
+}
+.metro-beats .beat.accent { border-color: rgba(47, 224, 112, 0.4); }
+.metro-beats .beat.hit {
+    background: var(--accent);
+    box-shadow: 0 0 16px var(--accent-glow);
+    transform: scale(1.35);
+}
+.metro-beats .beat.accent.hit {
+    background: var(--yellow);
+    box-shadow: 0 0 18px rgba(255, 211, 61, 0.5);
+}
+
+.metro-bpm {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+.metro-step {
+    width: 44px; height: 44px;
+    font-size: 22px;
+    padding: 0;
+    flex: 0 0 auto;
+}
+.metro-readout {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+.metro-input {
+    width: 110px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 30px;
+    font-weight: 700;
+    padding: 6px 8px;
+}
+/* hide number spinners — the ± buttons cover stepping */
+.metro-input::-webkit-outer-spin-button,
+.metro-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.metro-input { -moz-appearance: textfield; }
+.metro-unit { color: var(--text-dim); font-size: 13px; letter-spacing: 0.08em; }
+
+.metro-transport {
+    display: flex;
+    gap: 12px;
+    margin-top: 22px;
+}
+.metro-transport .metro-play { flex: 2; }
+.metro-transport .metro-tap { flex: 1; }
+.metro-hint {
+    font-size: 12.5px;
+    color: var(--text-faint);
+    text-align: center;
+    margin-top: 16px;
+    line-height: 1.5;
+}

@@ -48,6 +48,17 @@
         return res.json();
     }
 
+    // Authenticated fetch returning a Blob (no download prompt). Used by the
+    // metronome to play an already-uploaded song.
+    async function fetchBlob(url) {
+        const token = getToken();
+        const res = await fetch(url, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
+        return res.blob();
+    }
+
     // Authenticated binary download (Blob → save as file).
     async function download(url, fallbackName) {
         const token = getToken();
@@ -118,7 +129,7 @@
     }
 
     window.Dolly = {
-        api, download, toast,
+        api, download, fetchBlob, toast,
         getToken, getUser, setSession, clearSession,
         requireAuth, redirectIfAuthed,
         bytes, timeAgo, esc,

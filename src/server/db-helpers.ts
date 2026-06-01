@@ -19,13 +19,18 @@ import type {
 
 export async function dbInsertFile(record: FileRecord): Promise<void> {
     await sql`
-        INSERT INTO files (file_id, user_id, name, size_bytes, mime_type, local_path, created_at)
+        INSERT INTO files (file_id, user_id, name, size_bytes, mime_type, local_path, bpm, kind, created_at)
         VALUES (
             ${record.file_id}, ${record.user_id}, ${record.name},
             ${record.size_bytes}, ${record.mime_type}, ${record.local_path},
-            ${record.created_at}
+            ${record.bpm ?? null}, ${record.kind ?? "source"}, ${record.created_at}
         )
     `;
+}
+
+/** Update the stored tempo for a file (e.g. after detection or user edit). */
+export async function dbUpdateFileBpm(fileId: string, bpm: number | null): Promise<void> {
+    await sql`UPDATE files SET bpm = ${bpm} WHERE file_id = ${fileId}`;
 }
 
 export async function dbGetFile(fileId: string): Promise<FileRecord | null> {
@@ -39,6 +44,7 @@ export async function dbListFiles(
     perPage: number,
     sort: string,
     order: string,
+    kind: "source" | "output" = "source",
 ): Promise<{ files: FileRecord[]; total: number }> {
     const offset = (page - 1) * perPage;
     const asc = order !== "desc";
@@ -48,17 +54,17 @@ export async function dbListFiles(
 
     const rows = await (asc
         ? col === "name"
-            ? sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY name ASC LIMIT ${perPage} OFFSET ${offset}`
+            ? sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY name ASC LIMIT ${perPage} OFFSET ${offset}`
             : col === "size_bytes"
-            ? sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY size_bytes ASC LIMIT ${perPage} OFFSET ${offset}`
-            : sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY created_at ASC LIMIT ${perPage} OFFSET ${offset}`
+            ? sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY size_bytes ASC LIMIT ${perPage} OFFSET ${offset}`
+            : sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY created_at ASC LIMIT ${perPage} OFFSET ${offset}`
         : col === "name"
-        ? sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY name DESC LIMIT ${perPage} OFFSET ${offset}`
+        ? sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY name DESC LIMIT ${perPage} OFFSET ${offset}`
         : col === "size_bytes"
-        ? sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY size_bytes DESC LIMIT ${perPage} OFFSET ${offset}`
-        : sql`SELECT * FROM files WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT ${perPage} OFFSET ${offset}`);
+        ? sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY size_bytes DESC LIMIT ${perPage} OFFSET ${offset}`
+        : sql`SELECT * FROM files WHERE user_id = ${userId} AND kind = ${kind} ORDER BY created_at DESC LIMIT ${perPage} OFFSET ${offset}`);
 
-    const countRows = await sql`SELECT COUNT(*)::int AS total FROM files WHERE user_id = ${userId}`;
+    const countRows = await sql`SELECT COUNT(*)::int AS total FROM files WHERE user_id = ${userId} AND kind = ${kind}`;
     return {
         files: rows.map(rowToFile),
         total: (countRows[0]?.total as number) ?? 0,
@@ -87,6 +93,8 @@ function rowToFile(row: Record<string, unknown>): FileRecord {
         size_bytes: Number(row.size_bytes),
         mime_type: row.mime_type as string,
         local_path: row.local_path as string,
+        bpm: row.bpm != null ? Number(row.bpm) : null,
+        kind: (row.kind as "source" | "output" | undefined) ?? "source",
         created_at: toIso(row.created_at),
     };
 }

@@ -7,9 +7,13 @@
 
 import { neon } from "@neondatabase/serverless";
 
-const DATABASE_URL =
-    process.env.DATABASE_URL ??
-    "postgresql://neondb_owner:npg_YHcEx34sgUik@ep-old-sun-anu91iem.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+    throw new Error(
+        "DATABASE_URL is not set. Provide the Neon connection string via the environment (see .env.example).",
+    );
+}
 
 /**
  * Tagged-template SQL executor.
