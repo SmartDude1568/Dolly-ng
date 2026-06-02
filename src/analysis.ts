@@ -106,7 +106,7 @@ export class AudioAnalyzer {
                 break;
             }
 
-            offset += 8 + chunkSize;
+            offset += 8 + chunkSize + (chunkSize % 2);
         }
 
         if (!fmtFound) {
@@ -224,8 +224,13 @@ export class AudioAnalyzer {
             onsets[i - 1] = Math.max(0, energies[i]! - energies[i - 1]!);
         }
 
-        // Normalize onsets
-        const maxOnset = Math.max(...onsets);
+        // Normalize onsets. Compute the max with a loop instead of
+        // `Math.max(...onsets)`: spreading a large typed array as call args
+        // can overflow the call stack (RangeError) on long WAVs.
+        let maxOnset = 0;
+        for (let i = 0; i < onsets.length; i++) {
+            if (onsets[i]! > maxOnset) maxOnset = onsets[i]!;
+        }
         if (maxOnset === 0) return null;
         for (let i = 0; i < onsets.length; i++) {
             onsets[i]! /= maxOnset;
@@ -238,10 +243,15 @@ export class AudioAnalyzer {
         const minLag = Math.floor((60 / maxBpm) * windowsPerSecond);
         const maxLag = Math.floor((60 / minBpm) * windowsPerSecond);
 
+        const lagLimit = Math.min(maxLag, Math.floor(onsets.length / 2) - 1);
+
+        // Compute the mean-normalized autocorrelation for each candidate lag and
+        // keep the scores so we can later reason about octave (half/double) errors.
+        const correlations = new Float32Array(lagLimit + 1);
         let bestLag = minLag;
         let bestCorrelation = -Infinity;
 
-        for (let lag = minLag; lag <= maxLag && lag < onsets.length / 2; lag++) {
+        for (let lag = minLag; lag <= lagLimit; lag++) {
             let correlation = 0;
             let count = 0;
             for (let i = 0; i < onsets.length - lag; i++) {
@@ -249,6 +259,7 @@ export class AudioAnalyzer {
                 count++;
             }
             correlation /= count;
+            correlations[lag] = correlation;
 
             if (correlation > bestCorrelation) {
                 bestCorrelation = correlation;
@@ -256,9 +267,50 @@ export class AudioAnalyzer {
             }
         }
 
-        // Convert lag to BPM
-        const secondsPerBeat = bestLag / windowsPerSecond;
-        const bpm = 60 / secondsPerBeat;
+        // Look up the (already-computed) autocorrelation energy for a lag,
+        // returning -Infinity for lags outside the searched range.
+        const corrAt = (lag: number): number => {
+            const l = Math.round(lag);
+            if (l < minLag || l > lagLimit) return -Infinity;
+            return correlations[l]!;
+        };
+
+        // Octave correction: the raw autocorrelation peak is often a half- or
+        // double-tempo alias of the true beat. Walk the best lag by factors of
+        // two toward the half/double neighbour whenever that neighbour has
+        // comparable-or-stronger support, then fold the BPM into a musical
+        // range (70-180) so we don't report e.g. 60 or 200 when 120 fits.
+        const PREFER = 0.9; // accept an octave swap if the neighbour is >=90% as strong
+        const foldMinBpm = 70;
+        const foldMaxBpm = 180;
+
+        const lagToBpm = (lag: number): number => 60 / (lag / windowsPerSecond);
+
+        // Prefer doubling the lag (slower tempo) when it is similarly supported.
+        for (let i = 0; i < 3; i++) {
+            const doubled = bestLag * 2;
+            if (corrAt(doubled) >= bestCorrelation * PREFER && lagToBpm(doubled) >= foldMinBpm) {
+                bestLag = Math.round(doubled);
+                bestCorrelation = correlations[bestLag]!;
+            } else {
+                break;
+            }
+        }
+        // Prefer halving the lag (faster tempo) when it is similarly supported.
+        for (let i = 0; i < 3; i++) {
+            const halved = bestLag / 2;
+            if (corrAt(halved) >= bestCorrelation * PREFER && lagToBpm(halved) <= foldMaxBpm) {
+                bestLag = Math.round(halved);
+                bestCorrelation = correlations[bestLag]!;
+            } else {
+                break;
+            }
+        }
+
+        // Convert lag to BPM, then fold into the musical range by octaves.
+        let bpm = lagToBpm(bestLag);
+        while (bpm < foldMinBpm) bpm *= 2;
+        while (bpm > foldMaxBpm) bpm /= 2;
 
         // Round to nearest integer
         return Math.round(bpm);

@@ -19,22 +19,46 @@ export const conversionsRouter = Router();
 
 conversionsRouter.use(requireAuth);
 
+const INSTRUMENT_ALIASES: Readonly<Record<string, string>> = {
+    guitar: "guitar",
+    bass: "bass",
+    drums: "drums",
+    drum: "drums",
+    keys: "keys",
+    keyboard: "keys",
+    piano: "keys",
+};
+
+const VALID_DIFFICULTIES: ReadonlySet<string> = new Set(["expert", "hard", "medium", "easy"]);
+
 // ── POST /conversions ───────────────────────────────────────────────────
 
 conversionsRouter.post("/", async (req, res) => {
-    const {
-        input_file_id,
-        instruments = ["guitar", "bass", "drums"],
-        difficulty = "expert",
-    } = req.body as {
+    const { input_file_id, instruments: rawInstruments, difficulty: rawDifficulty } = req.body as {
         input_file_id?: string;
-        instruments?: string[];
-        difficulty?: string;
+        instruments?: unknown;
+        difficulty?: unknown;
     };
 
     if (!input_file_id) {
         res.status(400).json({
             error: { code: "BAD_REQUEST", message: "input_file_id is required" },
+        });
+        return;
+    }
+
+    const instruments = normalizeInstruments(rawInstruments);
+    if (!instruments.ok) {
+        res.status(422).json({
+            error: { code: "INVALID_INPUT", message: instruments.message },
+        });
+        return;
+    }
+
+    const difficulty = normalizeDifficulty(rawDifficulty);
+    if (!difficulty.ok) {
+        res.status(422).json({
+            error: { code: "INVALID_INPUT", message: difficulty.message },
         });
         return;
     }
@@ -90,8 +114,8 @@ conversionsRouter.post("/", async (req, res) => {
     taskRecords.push(makeTask(userId, "split_stems", input_file_id, { stems: 4, model: "orion" }, now));
 
     // 2. One audio2chart task per instrument
-    for (const instrument of instruments) {
-        taskRecords.push(makeTask(userId, "audio2chart", input_file_id, { difficulty, instrument }, now));
+    for (const instrument of instruments.value) {
+        taskRecords.push(makeTask(userId, "audio2chart", input_file_id, { difficulty: difficulty.value, instrument }, now));
     }
 
     // 3. upload_s3 task
@@ -118,8 +142,8 @@ conversionsRouter.post("/", async (req, res) => {
         conversion: record,
         tasks: taskRecords,
         inputFile: file,
-        instruments,
-        difficulty,
+        instruments: instruments.value,
+        difficulty: difficulty.value,
         bpm: file.bpm ?? null,
     });
 
@@ -250,6 +274,81 @@ function makeTask(
         slot_id: null,
         error: null,
     };
+}
+
+type ValidationResult<T> =
+    | { ok: true; value: T }
+    | { ok: false; message: string };
+
+function normalizeInstruments(input: unknown): ValidationResult<string[]> {
+    if (!Array.isArray(input) || input.length === 0) {
+        return {
+            ok: false,
+            message: "instruments must be a non-empty array",
+        };
+    }
+
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    const unknown: unknown[] = [];
+
+    for (const value of input) {
+        if (typeof value !== "string") {
+            unknown.push(value);
+            continue;
+        }
+
+        const canonical = INSTRUMENT_ALIASES[value.trim().toLowerCase()];
+        if (!canonical) {
+            unknown.push(value);
+            continue;
+        }
+
+        if (!seen.has(canonical)) {
+            seen.add(canonical);
+            normalized.push(canonical);
+        }
+    }
+
+    if (unknown.length > 0) {
+        return {
+            ok: false,
+            message: `Unsupported instrument(s): ${unknown.map(formatValue).join(", ")}`,
+        };
+    }
+
+    if (normalized.length === 0) {
+        return {
+            ok: false,
+            message: "instruments must include at least one supported instrument",
+        };
+    }
+
+    return { ok: true, value: normalized };
+}
+
+function normalizeDifficulty(input: unknown): ValidationResult<string> {
+    const value = input ?? "expert";
+    if (typeof value !== "string") {
+        return {
+            ok: false,
+            message: "difficulty must be one of: expert, hard, medium, easy",
+        };
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (!VALID_DIFFICULTIES.has(normalized)) {
+        return {
+            ok: false,
+            message: "difficulty must be one of: expert, hard, medium, easy",
+        };
+    }
+
+    return { ok: true, value: normalized };
+}
+
+function formatValue(value: unknown): string {
+    return typeof value === "string" ? JSON.stringify(value) : String(value);
 }
 
 function publicConversion(c: ConversionRecord) {

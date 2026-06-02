@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     PRIMARY KEY (conversion_id, task_id)
 );
 
+-- Quality metrics: the serialized in-memory metrics registry snapshot, stored
+-- as one JSON document per key so the design-doc Quality Metrics survive a
+-- restart (see src/server/metrics-store.ts). Single writer (the API server).
+
+CREATE TABLE IF NOT EXISTS metrics_state (
+    key        TEXT PRIMARY KEY,
+    snapshot   TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Relax file foreign keys to ON DELETE SET NULL on already-created databases
 -- (the inline definitions above only apply to fresh installs). Without this,
 -- deleting a song that any historical task/conversion still references fails

@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Audio2ChartModal } from "../../chart/audio2chart.js";
 import type { ProgressEvent } from "../../chart/modal.js";
+import { requireAuth } from "../middleware.js";
 
 /**
  * Chart generation route backed by the Modal-hosted audio2chart service.
@@ -35,6 +36,19 @@ interface ChartJob {
 }
 
 const jobs = new Map<string, ChartJob>();
+const CHART_JOB_TTL_MS = 24 * 60 * 60 * 1000;
+const CHART_JOB_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+
+function evictExpiredJobs(now = Date.now()): void {
+    for (const [jobId, job] of jobs) {
+        if (now - job.createdAt > CHART_JOB_TTL_MS) {
+            jobs.delete(jobId);
+        }
+    }
+}
+
+const jobCleanupInterval = setInterval(evictExpiredJobs, CHART_JOB_CLEANUP_INTERVAL_MS);
+jobCleanupInterval.unref();
 
 const uploadDir = path.join(os.tmpdir(), "dolly-chart-uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -49,6 +63,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
     storage,
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB (matches /v1/files)
     fileFilter: (_req, file, cb) => {
         if (
             file.mimetype.startsWith("audio/") ||
@@ -62,6 +77,10 @@ const upload = multer({
 });
 
 export const chartsRouter = Router();
+
+// All chart routes call the PAID Modal endpoint and write uploads to disk —
+// require a valid bearer token to avoid an unauthenticated cost/DoS vector.
+chartsRouter.use(requireAuth);
 
 // ── POST /charts ───────────────────────────────────────────────────────────
 
@@ -93,6 +112,7 @@ chartsRouter.post("/", upload.single("audio"), (req, res) => {
     const outputDir =
         process.env.CHARTS_OUTPUT_DIR ?? path.resolve("./output/charts");
 
+    evictExpiredJobs();
     const jobId = crypto.randomUUID();
     const job: ChartJob = {
         id: jobId,
@@ -143,6 +163,7 @@ chartsRouter.post("/", upload.single("audio"), (req, res) => {
 // ── GET /charts/:id ────────────────────────────────────────────────────────
 
 chartsRouter.get("/:id", (req, res) => {
+    evictExpiredJobs();
     const job = jobs.get(req.params.id);
     if (!job) {
         res.status(404).json({ error: "Job not found" });
@@ -161,6 +182,7 @@ chartsRouter.get("/:id", (req, res) => {
 // ── GET /charts/:id/file ───────────────────────────────────────────────────
 
 chartsRouter.get("/:id/file", (req, res) => {
+    evictExpiredJobs();
     const job = jobs.get(req.params.id);
     if (!job) {
         res.status(404).json({ error: "Job not found" });

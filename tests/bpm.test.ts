@@ -72,6 +72,15 @@ async function runTests(): Promise<void> {
         assert.ok(duration > 7 && duration < 9, `Duration should be ~8s, got ${duration}`);
     });
 
+    await test("should return full source duration beyond the analysis window", async () => {
+        const longPath = path.join(TEST_DIR, "click-120-long.wav");
+        generateClickTrack(longPath, 120, 96);
+
+        const { duration } = await detectBpm(longPath);
+
+        assert.ok(duration > 95 && duration < 97, `Duration should be ~96s, got ${duration}`);
+    });
+
     await test("should throw for a non-existent file", async () => {
         let threw = false;
         try {

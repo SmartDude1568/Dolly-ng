@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createRequire } from "node:module";
 import { DummySplitter, type DummyStem } from "./split/dummy.js";
 import { LalalSplitter, type LalalStem } from "./split/lalal.js";
 import type { StemSplitter } from "./split.js";
@@ -9,8 +12,26 @@ import { Audio2Chart } from "./chart.js";
 import { parseChart } from "./chart/parse.js";
 import { writeChart } from "./chart/write.js";
 import { mergeCharts } from "./chart/merge.js";
-import { writeSngFromDir, type SngMetadata } from "./sng.js";
+import { packSng, type SngEntry, type SngMetadata } from "./sng.js";
 import { findCloneHeroSongsDir, installSng } from "./clonehero.js";
+
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+// ffmpeg-static exports the binary path (CJS `export =`).
+const FFMPEG_PATH: string = require("ffmpeg-static");
+
+/**
+ * Transcode any audio file to Ogg/Opus, the format Clone Hero's BASS backend
+ * expects inside a .sng (MP3 is rejected with a FileFormat error). Mirrors the
+ * worker's transcode step (src/server/worker.ts).
+ */
+async function transcodeToOpus(input: string, output: string): Promise<void> {
+    await execFileAsync(
+        FFMPEG_PATH,
+        ["-y", "-i", input, "-c:a", "libopus", "-b:a", "128k", output],
+        { timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 * 32 },
+    );
+}
 
 interface CliOptions {
     audioFile: string;
@@ -286,9 +307,10 @@ function runMerge(chartPaths: string[], outputPath: string, options: CliOptions)
     if (options.songGenre) songOverrides.Genre = options.songGenre;
     if (options.charterName) songOverrides.Charter = options.charterName;
 
-    const merged = mergeCharts(charts, {
-        songOverrides: Object.keys(songOverrides).length > 0 ? songOverrides : undefined,
-    });
+    const merged = mergeCharts(
+        charts,
+        Object.keys(songOverrides).length > 0 ? { songOverrides } : {},
+    );
 
     const resolvedOutput = path.resolve(outputPath);
     fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
@@ -453,8 +475,27 @@ async function runSngPackage(chartPath: string, options: CliOptions): Promise<vo
     if (options.charterName) metadata.charter = options.charterName;
 
     try {
-        writeSngFromDir(options.outputDir, sngPath, metadata);
-        console.log(`SNG written to: ${path.resolve(sngPath)}`);
+        // Pack ONLY the merged chart (as notes.chart) and the playable audio.
+        // The splitter writes raw .wav stems that Clone Hero can't use, and the
+        // output dir also holds every per-stem chart; packing the directory
+        // wholesale would ship no usable audio and a pile of stray charts.
+        // Mirror the worker: transcode the source mix to Opus and pack just it
+        // alongside the merged chart.
+        const entries: SngEntry[] = [];
+        entries.push({
+            name: "notes.chart",
+            data: fs.readFileSync(path.resolve(chartPath)),
+        });
+
+        const songOpus = path.join(options.outputDir, "song.opus");
+        console.log("Transcoding audio to Opus…");
+        await transcodeToOpus(path.resolve(options.audioFile), songOpus);
+        entries.push({ name: "song.opus", data: fs.readFileSync(songOpus) });
+
+        const sngBuf = packSng(entries, metadata);
+        fs.mkdirSync(path.dirname(path.resolve(sngPath)), { recursive: true });
+        fs.writeFileSync(sngPath, sngBuf);
+        console.log(`SNG written to: ${path.resolve(sngPath)} (${sngBuf.length} bytes)`);
     } catch (err) {
         console.error("Error packaging .sng:", err instanceof Error ? err.message : err);
         return;

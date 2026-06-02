@@ -5,6 +5,7 @@ songs/
 output/*
 .DS_STORE
 vendor/
+data/*
 
 # credentials and local config
 .env

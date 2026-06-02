@@ -3,16 +3,23 @@
   "version": "0.0.2",
   "description": "An automated tool to generate a full Guitar/Clone Hero level from an audio file.",
   "type": "module",
-  "main": "dist/index.js",
+  "private": true,
   "author": "Aidan Walker",
   "license": "GPL-3.0-only",
   "scripts": {
-    "test": "tsx tests/audio-analyzer.test.ts && tsx tests/bpm.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts && tsx tests/chart-merge.test.ts",
+    "test": "tsx tests/audio-analyzer.test.ts && tsx tests/bpm.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts && tsx tests/chart-merge.test.ts && tsx tests/sng.test.ts && tsx tests/audio2chart.test.ts && tsx tests/clonehero.test.ts && tsx tests/audio-duration.test.ts && tsx tests/metrics.test.ts && tsx tests/api-e2e.test.ts",
+    "test:unit": "tsx tests/audio-analyzer.test.ts && tsx tests/bpm.test.ts && tsx tests/split.test.ts && tsx tests/cache.test.ts && tsx tests/chart.test.ts && tsx tests/chart-merge.test.ts && tsx tests/sng.test.ts && tsx tests/audio2chart.test.ts && tsx tests/clonehero.test.ts && tsx tests/audio-duration.test.ts && tsx tests/metrics.test.ts",
     "test:bpm": "tsx tests/bpm.test.ts",
     "test:merge": "tsx tests/chart-merge.test.ts",
     "test:split": "tsx tests/split.test.ts",
     "test:cache": "tsx tests/cache.test.ts",
     "test:chart": "tsx tests/chart.test.ts",
+    "test:sng": "tsx tests/sng.test.ts",
+    "test:audio2chart": "tsx tests/audio2chart.test.ts",
+    "test:clonehero": "tsx tests/clonehero.test.ts",
+    "test:duration": "tsx tests/audio-duration.test.ts",
+    "test:metrics": "tsx tests/metrics.test.ts",
+    "test:e2e": "tsx tests/api-e2e.test.ts",
     "migrate": "tsx db/migrate.ts",
     "start": "tsx src/index.ts",
     "cli": "tsx src/cli.ts"
@@ -23,13 +30,14 @@
     "@types/multer": "^2.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.3.0",
+    "express-rate-limit": "^8.5.2",
     "ffmpeg-static": "^5.3.0",
     "multer": "^2.1.1",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",
+    "pg-mem": "^3.0.14",
     "playwright": "^1.60.0",
     "tsx": "^4.19.0"
   }

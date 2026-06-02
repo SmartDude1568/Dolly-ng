@@ -1,7 +1,6 @@
 import { Router } from "express";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import multer from "multer";
 import { requireAuth } from "../middleware.js";
@@ -14,13 +13,66 @@ import {
     dbUpdateFileBpm,
 } from "../db-helpers.js";
 import { detectBpm } from "../../bpm.js";
+import { metrics } from "../../metrics.js";
 import type { FileRecord } from "../types.js";
 
 export const filesRouter = Router();
 
+const BPM_DETECTION_CONCURRENCY = 2;
+let activeBpmDetections = 0;
+const pendingBpmDetections: Array<() => void> = [];
+
+async function acquireBpmDetectionSlot(): Promise<() => void> {
+    if (activeBpmDetections < BPM_DETECTION_CONCURRENCY) {
+        activeBpmDetections++;
+        return releaseBpmDetectionSlot;
+    }
+
+    return new Promise((resolve) => {
+        pendingBpmDetections.push(() => resolve(releaseBpmDetectionSlot));
+    });
+}
+
+function releaseBpmDetectionSlot(): void {
+    const next = pendingBpmDetections.shift();
+    if (next) {
+        next();
+        return;
+    }
+
+    activeBpmDetections--;
+}
+
+async function withBpmDetectionSlot<T>(fn: () => Promise<T>): Promise<T> {
+    const release = await acquireBpmDetectionSlot();
+    try {
+        return await fn();
+    } finally {
+        release();
+    }
+}
+
+async function unlinkStoredUpload(filePath: string): Promise<void> {
+    try {
+        await fs.promises.unlink(filePath);
+    } catch (err) {
+        console.warn(
+            `[files] Failed to clean up uploaded file ${filePath}:`,
+            err instanceof Error ? err.message : err,
+        );
+    }
+}
+
 // ── Multer setup ────────────────────────────────────────────────────────
 
-const uploadDir = path.join(os.tmpdir(), "dolly-files");
+// ISSUE 6: uploads previously lived under os.tmpdir(), which the OS can purge
+// at any time — pulling files out from under pending conversions and breaking
+// GET /files/:id/download. Store them in an app-controlled, durable directory
+// instead (UPLOAD_DIR, default ./data/uploads under the working dir), created
+// on startup.
+const uploadDir = process.env.UPLOAD_DIR
+    ? path.resolve(process.env.UPLOAD_DIR)
+    : path.resolve("./data/uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -65,34 +117,42 @@ filesRouter.post("/upload", upload.single("file"), async (req, res) => {
         return;
     }
 
-    const name = (req.body.name as string | undefined) ?? req.file.originalname;
+    const uploadedFile = req.file;
+    const name = (req.body.name as string | undefined) ?? uploadedFile.originalname;
 
     // Detect the tempo up front so the dashboard can seed its metronome the
     // moment the upload returns. A detection failure must not fail the upload —
     // the user can still set the BPM by hand via PATCH.
     let bpm: number | null = null;
     try {
-        const result = await detectBpm(req.file.path);
+        const result = await withBpmDetectionSlot(() => detectBpm(uploadedFile.path));
         bpm = result.bpm;
+        // Metric 3: input audio length (seconds) of the analysed source file.
+        metrics.recordAudioLength(result.duration);
     } catch (err) {
-        console.warn(
-            `[files] BPM detection failed for ${req.file.originalname}:`,
-            err instanceof Error ? err.message : err,
-        );
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[files] BPM detection failed for ${uploadedFile.originalname}:`, message);
+        // Metric 2: a detection failure is an error in the bpm module.
+        metrics.recordError("bpm", message);
     }
 
     const record: FileRecord = {
         file_id: `file_${crypto.randomUUID().slice(0, 8)}`,
         user_id: req.auth!.user_id,
         name,
-        size_bytes: req.file.size,
-        mime_type: req.file.mimetype,
+        size_bytes: uploadedFile.size,
+        mime_type: uploadedFile.mimetype,
         created_at: new Date().toISOString(),
         bpm,
-        local_path: req.file.path,
+        local_path: uploadedFile.path,
     };
 
-    await dbInsertFile(record);
+    try {
+        await dbInsertFile(record);
+    } catch (err) {
+        await unlinkStoredUpload(uploadedFile.path);
+        throw err;
+    }
 
     res.status(201).json({
         file_id: record.file_id,

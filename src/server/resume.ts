@@ -7,6 +7,11 @@
  * child was killed mid-step). Because the worker is now idempotent and reuses
  * on-disk stems/charts, such a conversion can simply be re-run: completed steps
  * are skipped and it picks up where it stopped.
+ *
+ * This startup sweep is intentionally for a single active server process. In a
+ * horizontally scaled deployment, add a database-backed lease/owner heartbeat
+ * before enabling this path so one instance cannot re-run work another instance
+ * still owns.
  */
 
 import { startConversion } from "./worker.js";
@@ -78,6 +83,14 @@ export async function resumeConversion(conversionId: string): Promise<boolean> {
 /**
  * On startup, re-launch any conversion left `in_progress` — these were
  * interrupted, since a clean finish always sets `completed` or `failed`.
+ *
+ * ISSUE 7: this used to fire every interrupted conversion off simultaneously.
+ * `startConversion` now gates on an in-process concurrency semaphore (see
+ * worker.ts, WORKER_CONCURRENCY, default 2), so the relaunched conversions
+ * enqueue here but only a bounded number actually run the pipeline at once.
+ *
+ * Horizontal scaling note: this process does not acquire a DB lease before
+ * resuming rows. Run this startup sweep on only one server instance.
  */
 export async function resumeInterruptedConversions(): Promise<void> {
     let convs;

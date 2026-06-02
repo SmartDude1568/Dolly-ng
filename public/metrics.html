@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dolly — Metrics</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="frets"><span></span><span></span><span></span><span></span><span></span></div>
+
+    <nav class="nav">
+        <a class="logo" href="index.html"><span class="dot"></span>Dolly</a>
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="metrics.html" class="active">Metrics</a>
+        </div>
+        <span class="nav-spacer"></span>
+        <span class="nav-user mono" id="uptime"></span>
+    </nav>
+
+    <main class="dash">
+        <div class="wrap">
+            <header class="dash-head reveal">
+                <div>
+                    <h1>Quality metrics</h1>
+                    <p>Live operational telemetry for the conversion pipeline. <span class="muted">Counts reset on restart.</span></p>
+                </div>
+                <div class="metrics-controls">
+                    <label class="auto-toggle"><input type="checkbox" id="auto" checked> Auto-refresh</label>
+                    <button class="btn btn-ghost btn-sm" id="refresh">↻ Refresh</button>
+                </div>
+            </header>
+
+            <!-- KPI cards -->
+            <div class="stat-grid reveal" id="kpis" style="animation-delay:.05s"></div>
+
+            <div class="metrics-grid">
+                <!-- Stem cache -->
+                <section class="panel reveal" style="animation-delay:.1s">
+                    <div class="panel-head"><h2>Stem cache</h2><span class="muted mono" id="cache-total"></span></div>
+                    <div class="panel-body" id="cache-body"></div>
+                </section>
+
+                <!-- Process durations -->
+                <section class="panel reveal" style="animation-delay:.12s">
+                    <div class="panel-head"><h2>Process durations</h2></div>
+                    <div class="panel-body" id="durations-body"></div>
+                </section>
+
+                <!-- Input audio length -->
+                <section class="panel reveal" style="animation-delay:.14s">
+                    <div class="panel-head"><h2>Input audio length</h2></div>
+                    <div class="panel-body" id="audio-body"></div>
+                </section>
+
+                <!-- Errors by module -->
+                <section class="panel reveal" style="animation-delay:.16s">
+                    <div class="panel-head"><h2>Errors by module</h2><span class="muted mono" id="errors-total"></span></div>
+                    <div class="panel-body" id="errors-body"></div>
+                </section>
+
+                <!-- Recent activity -->
+                <section class="panel reveal metrics-wide" style="animation-delay:.18s">
+                    <div class="panel-head"><h2>Recent activity</h2></div>
+                    <div class="panel-body" id="activity-body"></div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script src="common.js"></script>
+    <script src="metrics.js"></script>
+</body>
+</html>

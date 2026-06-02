@@ -1140,7 +1140,7 @@ Pass stems or full songs into model. Determine if outputted chart is acceptable,
 
 # Quality Metrics
 
-1. Stem cache hits
+1. Stem cache hits/misses
 2. Errors in each module
 3. Input audio length
 4. stemmer api process duration

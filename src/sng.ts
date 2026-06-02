@@ -149,7 +149,8 @@ export function packSng(entries: SngEntry[], metadata: SngMetadata = {}): Buffer
  *
  * Reads the following files if present:
  *   notes.chart        — required chart file
- *   *.ogg / *.mp3      — audio stems
+ *   *.opus / *.ogg     — audio (Clone Hero's BASS backend rejects MP3 inside
+ *                        a .sng with a FileFormat error, so MP3 is NOT packable)
  *   song.ini           — extra metadata (name, artist, etc.)
  *   album.png / album.jpg — album art
  */
@@ -159,7 +160,7 @@ export function packSngFromDir(songDir: string, metadata: SngMetadata = {}): Buf
     const files = fs.readdirSync(songDir);
     for (const filename of files) {
         const ext = path.extname(filename).toLowerCase();
-        const allowed = new Set([".chart", ".mid", ".ogg", ".mp3", ".ini", ".png", ".jpg", ".jpeg"]);
+        const allowed = new Set([".chart", ".mid", ".opus", ".ogg", ".ini", ".png", ".jpg", ".jpeg"]);
         if (!allowed.has(ext)) continue;
 
         const filePath = path.join(songDir, filename);

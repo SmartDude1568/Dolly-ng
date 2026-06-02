@@ -70,6 +70,51 @@ function generateWavFile(
     fs.writeFileSync(filePath, buffer);
 }
 
+function generateWavFileWithOddMetadata(filePath: string): void {
+    const sampleRate = 8000;
+    const duration = 0.1;
+    const frequency = 440;
+    const amplitude = 0.5;
+    const bytesPerSample = 2;
+    const bitDepth = 16;
+    const numSamples = Math.floor(sampleRate * duration);
+    const dataSize = numSamples * bytesPerSample;
+    const junkSize = 1;
+    const junkPaddedSize = junkSize + (junkSize % 2);
+    const dataChunkOffset = 12 + 8 + 16 + 8 + junkPaddedSize;
+    const dataOffset = dataChunkOffset + 8;
+    const buffer = Buffer.alloc(dataOffset + dataSize);
+
+    buffer.write("RIFF", 0);
+    buffer.writeUInt32LE(buffer.length - 8, 4);
+    buffer.write("WAVE", 8);
+
+    buffer.write("fmt ", 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(1, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * bytesPerSample, 28);
+    buffer.writeUInt16LE(bytesPerSample, 32);
+    buffer.writeUInt16LE(bitDepth, 34);
+
+    buffer.write("JUNK", 36);
+    buffer.writeUInt32LE(junkSize, 40);
+    buffer.writeUInt8(0x7f, 44);
+
+    buffer.write("data", dataChunkOffset);
+    buffer.writeUInt32LE(dataSize, dataChunkOffset + 4);
+
+    for (let i = 0; i < numSamples; i++) {
+        const t = i / sampleRate;
+        const sample = amplitude * Math.sin(2 * Math.PI * frequency * t);
+        buffer.writeInt16LE(Math.round(sample * 32767), dataOffset + i * 2);
+    }
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, buffer);
+}
+
 function generateClickTrack(
     filePath: string,
     options: {
@@ -178,6 +223,19 @@ async function runTests(): Promise<void> {
         assert.strictEqual(result.channels, 1);
         assert.strictEqual(result.bitDepth, 16);
         assert.ok(result.duration > 0.9 && result.duration < 1.1, "Duration should be ~1 second");
+    });
+
+    await test("should skip RIFF padding after odd-sized chunks", async () => {
+        const oddChunkPath = path.join(TEST_DIR, "odd-metadata.wav");
+        generateWavFileWithOddMetadata(oddChunkPath);
+
+        const analyzer = new AudioAnalyzer(oddChunkPath);
+        const result = await analyzer.analyze();
+
+        assert.strictEqual(result.sampleRate, 8000);
+        assert.strictEqual(result.channels, 1);
+        assert.strictEqual(result.bitDepth, 16);
+        assert.ok(result.duration > 0.09 && result.duration < 0.11, "Duration should be ~0.1 seconds");
     });
 
     // Test: Peak level

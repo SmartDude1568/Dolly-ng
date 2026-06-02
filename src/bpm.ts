@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { createRequire } from "node:module";
 
 import { AudioAnalyzer } from "./analysis.js";
+import { getAudioDurationSec } from "./audio-duration.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -34,7 +35,7 @@ const ANALYSIS_WINDOW_SEC = 90;
 export interface BpmResult {
     /** Detected tempo in beats per minute, or null if it could not be found. */
     bpm: number | null;
-    /** Full duration of the source audio in seconds (from the decode probe). */
+    /** Full duration of the source audio in seconds. */
     duration: number;
 }
 
@@ -57,6 +58,8 @@ export async function detectBpm(input: string): Promise<BpmResult> {
     );
 
     try {
+        const duration = await getAudioDurationSec(resolved);
+
         // -t before -i would clip the input; placing it as an output option
         // limits the decoded duration we write. PCM s16le mono @ 16 kHz.
         await execFileAsync(
@@ -75,7 +78,7 @@ export async function detectBpm(input: string): Promise<BpmResult> {
 
         const analyzer = new AudioAnalyzer(tmpWav);
         const result = await analyzer.analyze();
-        return { bpm: result.bpm, duration: result.duration };
+        return { bpm: result.bpm, duration };
     } finally {
         try {
             fs.unlinkSync(tmpWav);

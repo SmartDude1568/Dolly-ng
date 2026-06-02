@@ -226,21 +226,29 @@ export class LalalSplitter implements StemSplitter<LalalStem> {
         const fileId = await uploadFile(audioPath, this.apiKey);
         const baseName = path.basename(audioPath, path.extname(audioPath));
 
-        const results: SplitResult<LalalStem> = {
-            sourcePath: audioPath,
-            stems: [],
-        };
+        // The LALAL.ai /api/check/ endpoint reports status *per file*, not per
+        // stem: it returns a single `split` result for the file's currently
+        // processing stem. Splitting multiple stems concurrently against the
+        // same file id would therefore collide on the check response, so the
+        // request → poll step must stay serial. The downloads, however, are
+        // independent (each hits a distinct CDN url) and can overlap with the
+        // request/poll of subsequent stems, so we kick them off concurrently
+        // and await them all at the end.
+        const downloads: Array<Promise<{ stem: LalalStem; path: string }>> = [];
 
         for (const stem of stems) {
             await requestSplit(fileId, stem, this.apiKey);
             const stemUrl = await pollUntilComplete(fileId, this.apiKey, this.pollIntervalMs);
 
             const destPath = path.join(this.outputDir, `${baseName}_${stem}.wav`);
-            await downloadFile(stemUrl, destPath);
-
-            results.stems.push({ stem, path: destPath });
+            downloads.push(
+                downloadFile(stemUrl, destPath).then(() => ({ stem, path: destPath })),
+            );
         }
 
-        return results;
+        return {
+            sourcePath: audioPath,
+            stems: await Promise.all(downloads),
+        };
     }
 }

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { StemSplitter, SplitResult } from "./split.js";
+import { metrics } from "./metrics.js";
 
 interface CacheManifest {
     [key: string]: string | undefined;
@@ -48,9 +49,11 @@ export class CachedSplitter<S extends string> implements StemSplitter<S> {
 
         if (cached.length > 0) {
             console.log(`Cache hit for stems: ${cached.map(c => c.stem).join(", ")}`);
+            metrics.recordCacheHit(cached.length);
         }
         if (uncached.length > 0) {
             console.log(`Cache miss for stems: ${uncached.join(", ")}`);
+            metrics.recordCacheMiss(uncached.length);
         }
 
         let freshResults: Map<S, string> = new Map();

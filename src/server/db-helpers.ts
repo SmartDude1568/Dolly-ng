@@ -126,28 +126,49 @@ export async function dbUpdateTask(
     taskId: string,
     fields: Partial<Pick<TaskRecord, "status" | "progress" | "slot_id" | "output_file_id" | "error" | "started_at" | "completed_at">>,
 ): Promise<void> {
-    // Build updates only for fields provided
-    if (fields.status !== undefined) {
-        await sql`UPDATE tasks SET status = ${fields.status} WHERE task_id = ${taskId}`;
-    }
-    if (fields.progress !== undefined) {
-        await sql`UPDATE tasks SET progress = ${fields.progress} WHERE task_id = ${taskId}`;
-    }
-    if (fields.slot_id !== undefined) {
-        await sql`UPDATE tasks SET slot_id = ${fields.slot_id} WHERE task_id = ${taskId}`;
-    }
-    if (fields.output_file_id !== undefined) {
-        await sql`UPDATE tasks SET output_file_id = ${fields.output_file_id} WHERE task_id = ${taskId}`;
-    }
-    if (fields.error !== undefined) {
-        await sql`UPDATE tasks SET error = ${JSON.stringify(fields.error)} WHERE task_id = ${taskId}`;
-    }
-    if (fields.started_at !== undefined) {
-        await sql`UPDATE tasks SET started_at = ${fields.started_at} WHERE task_id = ${taskId}`;
-    }
-    if (fields.completed_at !== undefined) {
-        await sql`UPDATE tasks SET completed_at = ${fields.completed_at} WHERE task_id = ${taskId}`;
-    }
+    // Whitelist of updatable columns → value extractor. The whitelist keeps the
+    // dynamically-built SET clause injection-safe (only known column names are
+    // ever emitted; values are always passed as bound parameters).
+    const columns: Array<{
+        col: string;
+        present: boolean;
+        value: unknown;
+    }> = [
+        { col: "status", present: fields.status !== undefined, value: fields.status },
+        { col: "progress", present: fields.progress !== undefined, value: fields.progress },
+        { col: "slot_id", present: fields.slot_id !== undefined, value: fields.slot_id },
+        { col: "output_file_id", present: fields.output_file_id !== undefined, value: fields.output_file_id },
+        { col: "error", present: fields.error !== undefined, value: fields.error != null ? JSON.stringify(fields.error) : null },
+        { col: "started_at", present: fields.started_at !== undefined, value: fields.started_at },
+        { col: "completed_at", present: fields.completed_at !== undefined, value: fields.completed_at },
+    ];
+
+    const provided = columns.filter((c) => c.present);
+    if (provided.length === 0) return; // nothing to update → no query
+
+    // Build a synthetic tagged-template call so the executor (Neon or the
+    // pg-mem fake) binds every value as $1..$n. The static `strings` fragments
+    // contain only the SET column names (from the whitelist) and SQL keywords;
+    // all interpolated `values` become bound parameters.
+    const values: unknown[] = [];
+    const strings: string[] = [];
+
+    provided.forEach((c, i) => {
+        // First fragment opens the statement; subsequent fragments separate
+        // each "col = $n" assignment with a comma.
+        strings.push(i === 0 ? `UPDATE tasks SET ${c.col} = ` : `, ${c.col} = `);
+        values.push(c.value);
+    });
+    // Final fragment closes the SET list and adds the WHERE predicate; taskId is
+    // the last bound parameter.
+    strings.push(" WHERE task_id = ");
+    values.push(taskId);
+    strings.push("");
+
+    // The executor expects a TemplateStringsArray (a string[] with a `raw`
+    // property); the cast mirrors how a real tagged template would invoke it.
+    const tsa = Object.assign([...strings], { raw: [...strings] }) as unknown as TemplateStringsArray;
+    await sql(tsa, ...values);
 }
 
 export async function dbListTasks(
