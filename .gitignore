@@ -19,7 +19,8 @@ modal/__pycache__/
 *.pyc
 
 # experimental local test scripts
-modal/
+modal/*
+!modal/audio2chart_overlay/
 modaltest/
 modaltest.*
 

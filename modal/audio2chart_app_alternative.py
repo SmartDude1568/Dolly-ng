@@ -57,6 +57,8 @@ Costs:
     Scales to zero when idle (no cost when not in use).
 """
 
+from pathlib import Path
+
 import modal
 from fastapi import File, Form, UploadFile
 
@@ -77,18 +79,29 @@ from fastapi import File, Form, UploadFile
 #   modules/trainer.py → pytorch-lightning (only needed for training, not inference)
 #   configs/           → hydra-core, omegaconf (only needed for training)
 # ---------------------------------------------------------------------------
+# The upstream commit the overlay below was written and tested against.
+UPSTREAM_COMMIT = "b6abaaf"
+
+# generate.py + chart/{postprocess,tempo,chart_writer}.py from our audio2chart working
+# copy. They replace the upstream files of the same name and add sustains, star power,
+# sections and Hard/Medium/Easy reductions to the generated chart. Everything else
+# (inference/, the tokenizer, ...) stays exactly as upstream.
+OVERLAY_DIR = Path(__file__).parent / "audio2chart_overlay"
+
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("git", "ffmpeg", "libsndfile1")
     .run_commands(
         "git clone https://github.com/3podi/audio2chart.git /opt/audio2chart",
+        f"git -C /opt/audio2chart checkout {UPSTREAM_COMMIT}",
         # Install from the repo's pinned requirements.txt for reproducibility.
         # This includes torch==2.9.1, torchaudio==2.9.1, transformers==4.57.1,
-        # librosa==0.11.0, encodec deps via transformers, numba, scipy, etc.
+        # librosa==0.11.0, scikit-learn (section detection), numba, scipy, etc.
         "pip install -r /opt/audio2chart/requirements.txt",
         # FastAPI + python-multipart for UploadFile + Form() fields
         "pip install 'fastapi[standard]' python-multipart",
     )
+    .add_local_dir(str(OVERLAY_DIR), "/opt/audio2chart", copy=True)
 )
 
 app = modal.App("audio2chart", image=image)
@@ -132,13 +145,17 @@ async def generate(
     model_name: str = Form("3podi/charter-v1.0-40-M-best-acc"),
     temperature: float = Form(0.5),
     top_k: int = Form(32),
-    bpm: int = Form(200),
+    bpm: float = Form(0.0),
     resolution: int = Form(480),
     name: str = Form(""),
     artist: str = Form(""),
     album: str = Form(""),
     genre: str = Form(""),
     charter: str = Form(""),
+    sustains: bool = Form(True),
+    beat_audio: UploadFile | None = File(
+        None, description="Full mix the audio was taken from, used for beat tracking"
+    ),
 ):
     """
     Generate a Guitar Hero / Clone Hero .chart file from uploaded audio.
@@ -170,6 +187,16 @@ async def generate(
         f.write(audio_bytes)
         audio_path = f.name
 
+    # The full mix, for beat tracking (beat tracking on one stem is unreliable)
+    beat_audio_path = None
+    if beat_audio is not None:
+        beat_bytes = await beat_audio.read()
+        if beat_bytes:
+            beat_suffix = Path(beat_audio.filename).suffix if beat_audio.filename else ".mp3"
+            with tempfile.NamedTemporaryFile(suffix=beat_suffix, delete=False, dir="/tmp") as f:
+                f.write(beat_bytes)
+                beat_audio_path = f.name
+
     # Clean output directory between invocations
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     for old in Path(OUTPUT_DIR).glob("*.chart"):
@@ -182,6 +209,11 @@ async def generate(
     #
     # Note: --output is a FOLDER. generate.py creates <folder>/notes.chart
     # -------------------------------------------------------------------
+    # Tempo: `--tempo auto` beat-tracks the full mix (`beat_audio`; the stem when absent)
+    # and writes a tempo map that follows it, so beat lines sit on the beats. The confirmed
+    # `bpm` only picks the beat octave (or, if the tracker and the listener disagree, a
+    # constant tempo fitted to it), so the user's tempo is never overridden. Notes snap to
+    # the musical grid and onto audio onsets (generate.py defaults).
     args = [
         sys.executable,
         os.path.join(REPO_DIR, "generate.py"),
@@ -194,11 +226,18 @@ async def generate(
         str(temperature),
         "--top_k",
         str(top_k),
-        "--bpm",
-        str(bpm),
         "--resolution",
         str(resolution),
+        "--tempo",
+        "auto",
     ]
+    if bpm > 0:
+        args.extend(["--bpm", str(bpm)])
+    if beat_audio_path:
+        args.extend(["--beat-audio", beat_audio_path])
+
+    if not sustains:
+        args.append("--no-sustains")
 
     if name:
         args.extend(["--name", name])
@@ -220,11 +259,13 @@ async def generate(
         timeout=540,  # 9 min hard limit (function timeout is 10 min)
     )
 
-    # Clean up temp audio file
-    try:
-        os.unlink(audio_path)
-    except OSError:
-        pass
+    # Clean up temp audio files
+    for temp_path in (audio_path, beat_audio_path):
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
     if result.returncode != 0:
         # Surface the 30-second minimum error clearly
