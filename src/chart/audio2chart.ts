@@ -42,6 +42,17 @@ export interface GenerateOverrides {
     name?: string | undefined;
     artist?: string | undefined;
     charter?: string | undefined;
+    /**
+     * Hold notes through the gap before the next note. On by default; the worker
+     * turns it off for drums, which have no sustains in Clone Hero.
+     */
+    sustains?: boolean | undefined;
+    /**
+     * The full mix the stem came from. Beat tracking on a single stem is unreliable,
+     * so the service tracks the beats on this file instead and writes the chart's
+     * tempo map against them. Ignored when it is the same file as the audio itself.
+     */
+    beatAudioPath?: string | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -95,6 +106,21 @@ export class Audio2ChartModal {
         if (o.album !== undefined) form.append("album", o.album);
         if (o.genre !== undefined) form.append("genre", o.genre);
         if (charter !== undefined) form.append("charter", charter);
+        if (overrides.sustains !== undefined) form.append("sustains", String(overrides.sustains));
+        const beatAudio = overrides.beatAudioPath ? path.resolve(overrides.beatAudioPath) : null;
+        if (beatAudio && beatAudio !== resolved) {
+            if (!fs.existsSync(beatAudio)) {
+                throw new Error(`Beat audio file not found: ${beatAudio}`);
+            }
+            const beatBuf = fs.readFileSync(beatAudio);
+            const beatBytes = new Uint8Array(beatBuf.byteLength);
+            beatBytes.set(beatBuf);
+            form.append(
+                "beat_audio",
+                new Blob([beatBytes], { type: "application/octet-stream" }),
+                path.basename(beatAudio),
+            );
+        }
 
         const headers: Record<string, string> = {};
         if (this.token) headers["x-audio2chart-token"] = this.token;

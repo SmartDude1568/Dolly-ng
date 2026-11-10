@@ -130,6 +130,19 @@ async function runTests(): Promise<void> {
         assert.strictEqual(fs.readFileSync(result.chartPath, "utf8"), SAMPLE_CHART);
     });
 
+    await test("should forward the per-call sustains override, and omit it otherwise", async () => {
+        const sent: Array<string | null> = [];
+        const fetchFn = (async (_url: unknown, init?: RequestInit) => {
+            sent.push((init?.body as FormData).get("sustains") as string | null);
+            return new Response(SAMPLE_CHART, { status: 200 });
+        }) as typeof fetch;
+        const client = new Audio2ChartModal({ endpointUrl: "https://x", fetchFn });
+        await client.generateText(AUDIO, { sustains: false });
+        await client.generateText(AUDIO, { sustains: true });
+        await client.generateText(AUDIO);
+        assert.deepStrictEqual(sent, ["false", "true", null]);
+    });
+
     // Cleanup
     try {
         fs.rmSync(TEST_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

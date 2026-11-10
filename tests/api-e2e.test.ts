@@ -142,11 +142,25 @@ function writeSilentWav(filePath: string, durationSec: number, sampleRate = 8000
 }
 
 // ── Compact .sng unpacker (magic + file index + per-file unmask) ─────────────
-function unpackSng(buf: Buffer): { magic: string; files: Map<string, Buffer> } {
+function unpackSng(buf: Buffer): { magic: string; metadata: Map<string, string>; files: Map<string, Buffer> } {
     const magic = buf.toString("ascii", 0, 6);
     const xorMask = buf.subarray(10, 26);
     let off = 26;
-    const metaLen = Number(buf.readBigUInt64LE(off)); off += 8 + metaLen; // skip metadata
+    const metaLen = Number(buf.readBigUInt64LE(off)); off += 8;
+    // Parse the metadata pairs (the embedded song.ini) before skipping ahead.
+    const metadata = new Map<string, string>();
+    {
+        let mOff = off;
+        const metaCount = Number(buf.readBigUInt64LE(mOff)); mOff += 8;
+        for (let i = 0; i < metaCount; i++) {
+            const keyLen = buf.readInt32LE(mOff); mOff += 4;
+            const key = buf.toString("utf8", mOff, mOff + keyLen); mOff += keyLen;
+            const valLen = buf.readInt32LE(mOff); mOff += 4;
+            const val = buf.toString("utf8", mOff, mOff + valLen); mOff += valLen;
+            metadata.set(key, val);
+        }
+    }
+    off += metaLen; // skip past the metadata section
     const fileMetaLen = Number(buf.readBigUInt64LE(off)); off += 8;
     const indexEnd = off + fileMetaLen;
     const fileCount = Number(buf.readBigUInt64LE(off)); off += 8;
@@ -166,7 +180,7 @@ function unpackSng(buf: Buffer): { magic: string; files: Map<string, Buffer> } {
         for (let i = 0; i < len; i++) data[i] = masked[i]! ^ (xorMask[i % 16]! ^ (i & 0xff));
         files.set(name, data);
     }
-    return { magic, files };
+    return { magic, metadata, files };
 }
 
 async function main(): Promise<void> {
@@ -406,16 +420,26 @@ async function main(): Promise<void> {
             const buf = Buffer.from(await res.arrayBuffer());
             assert.ok(buf.length > 0, "downloaded a non-empty file");
 
-            const { magic, files } = unpackSng(buf);
+            const { magic, metadata, files } = unpackSng(buf);
             assert.strictEqual(magic, "SNGPKG", "downloaded file is a real .sng archive");
             assert.ok(files.has("notes.chart"), ".sng contains notes.chart");
             assert.ok(files.has("song.opus"), ".sng contains the Opus mix");
 
             const chart = files.get("notes.chart")!.toString("utf8");
-            // The three instruments landed on their Clone Hero tracks.
+            // The four instruments landed on their Clone Hero tracks.
             assert.ok(chart.includes("[ExpertSingle]"), "guitar → ExpertSingle");
             assert.ok(chart.includes("[ExpertDoubleBass]"), "bass → ExpertDoubleBass");
             assert.ok(chart.includes("[ExpertDrums]"), "drums → ExpertDrums");
+            assert.ok(chart.includes("[ExpertKeyboard]"), "keys → ExpertKeyboard");
+
+            // song.ini must advertise exactly the parts notes.chart contains —
+            // every requested instrument charted notes here, so each is enabled.
+            // (A mismatch is the dropped-guitar bug: a part promised in song.ini
+            // but absent from notes.chart makes Clone Hero hide it.)
+            assert.strictEqual(metadata.get("diff_guitar"), "5", "guitar advertised in song.ini");
+            assert.strictEqual(metadata.get("diff_bass"), "5", "bass advertised in song.ini");
+            assert.strictEqual(metadata.get("diff_drums"), "5", "drums advertised in song.ini");
+            assert.strictEqual(metadata.get("diff_keys"), "5", "keys advertised in song.ini");
             // Tempo was forced to the confirmed 120 BPM (milli-BPM) and the
             // model's extra B event was dropped.
             assert.ok(chart.includes("B 120000"), "SyncTrack enforced to 120 BPM");

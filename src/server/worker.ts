@@ -131,6 +131,68 @@ function sanitize(name: string): string {
     return name.replace(/[^a-z0-9_\-. ]/gi, "_").trim() || "song";
 }
 
+/** A per-instrument chart after it has been remapped onto its CH track. */
+export interface ChartedInstrument {
+    /** Canonical instrument name (guitar, bass, drums, keys). */
+    instrument: string;
+    /** How this instrument maps to a stem / CH track. */
+    entry: InstrumentMapEntry;
+    /** Full target section, e.g. "ExpertSingle". */
+    section: string;
+    /** The remapped single-track chart. */
+    chart: Chart;
+}
+
+/** Count the note (`N`) events in a chart's named track section. */
+export function countSectionNotes(chart: Chart, section: string): number {
+    const sec = chart.tracks.get(section);
+    if (!sec) return 0;
+    let n = 0;
+    for (const ev of sec.events) if (ev.typeCode === "N") n++;
+    return n;
+}
+
+/**
+ * Partition charted instruments into those that actually carry notes and those
+ * audio2chart returned empty (no `N` events on the target track).
+ *
+ * THE DROPPED-GUITAR BUG: audio2chart can hand back a chart whose instrument
+ * track has no notes (e.g. when a separated stem is near-silent). The worker
+ * used to advertise every *requested* instrument in song.ini regardless, so a
+ * note-less guitar still set `diff_guitar`. Clone Hero then hides a part it was
+ * promised but cannot find in notes.chart — the song loads "without a guitar
+ * option". Dropping note-less instruments here keeps song.ini and notes.chart in
+ * agreement so CH only ever shows parts that are really playable.
+ */
+export function selectInstrumentsWithNotes<T extends { chart: Chart; section: string }>(
+    charted: T[],
+): { kept: T[]; dropped: T[] } {
+    const kept: T[] = [];
+    const dropped: T[] = [];
+    for (const c of charted) {
+        if (countSectionNotes(c.chart, c.section) > 0) kept.push(c);
+        else dropped.push(c);
+    }
+    return { kept, dropped };
+}
+
+/**
+ * Build the song.ini `diff_*` fields from the set of CH instrument base names
+ * (guitar/bass/drums/keys) that actually landed notes in the merged chart, so
+ * the advertised difficulties always match the tracks present in notes.chart.
+ */
+export function songIniDiffFields(
+    producedChNames: Set<string>,
+    diffValue: string,
+): { diff_guitar: string; diff_bass: string; diff_drums: string; diff_keys: string } {
+    return {
+        diff_guitar: producedChNames.has("guitar") ? diffValue : "-1",
+        diff_bass: producedChNames.has("bass") ? diffValue : "-1",
+        diff_drums: producedChNames.has("drums") ? diffValue : "-1",
+        diff_keys: producedChNames.has("keys") ? diffValue : "-1",
+    };
+}
+
 /**
  * ISSUE 6: remove a conversion's intermediate artifacts (stems, transcoded
  * .opus, notes.chart, cached per-instrument .chart files, etc.) once the .sng
@@ -196,7 +258,10 @@ export interface WorkerExternals {
     };
     /** Build the audio2chart client used to chart each stem. */
     createChartClient(opts: { bpm: number | undefined }): {
-        generateText(audioPath: string, overrides?: { name?: string }): Promise<string>;
+        generateText(
+            audioPath: string,
+            overrides?: { name?: string; sustains?: boolean; beatAudioPath?: string },
+        ): Promise<string>;
     };
 }
 
@@ -346,7 +411,7 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
                   bpm: bpm ?? undefined,
               });
         const diffPrefix = DIFFICULTY_PREFIX[difficulty.toLowerCase()] ?? "Expert";
-        const perInstrumentCharts: Chart[] = [];
+        const charted: ChartedInstrument[] = [];
 
         for (let i = 0; i < instrEntries.length; i++) {
             const instrument = instruments[i]!;
@@ -374,6 +439,10 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
                 const chartStart = Date.now();
                 text = await modal.generateText(stemPath, {
                     name: `${songTitle} (${instrument})`,
+                    // Drums have no sustains in Clone Hero; every other part does.
+                    sustains: entry.section !== "Drums",
+                    // Beats are tracked on the full mix; a lone stem is unreliable.
+                    beatAudioPath: inputFile.local_path,
                 });
                 metrics.recordDuration("audio2chart", Date.now() - chartStart);
                 fs.writeFileSync(chartCachePath, text, "utf8");
@@ -382,14 +451,33 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
             }
 
             const chart = parseChart(text);
-            perInstrumentCharts.push(
-                remapChartTracks(chart, `${diffPrefix}${entry.section}`, entry.section === "Drums"),
-            );
+            const section = `${diffPrefix}${entry.section}`;
+            charted.push({
+                instrument,
+                entry,
+                section,
+                chart: remapChartTracks(chart, section, entry.section === "Drums"),
+            });
         }
 
-        if (perInstrumentCharts.length === 0) {
+        if (charted.length === 0) {
             throw new Error("no instrument charts were generated");
         }
+
+        // Drop any instrument audio2chart returned with no notes so the
+        // packaged .sng never advertises a part that notes.chart lacks (the
+        // dropped-guitar bug). Surface each drop loudly rather than silently
+        // shipping an inconsistent .sng.
+        const { kept, dropped } = selectInstrumentsWithNotes(charted);
+        for (const d of dropped) {
+            const msg = `audio2chart produced no notes for ${d.instrument} (stem ${d.entry.stem}); excluding it from the chart`;
+            log(`WARNING: ${msg}`);
+            metrics.recordError("audio2chart", msg);
+        }
+        if (kept.length === 0) {
+            throw new Error("no instrument produced any chart notes");
+        }
+        const perInstrumentCharts = kept.map((c) => c.chart);
 
         // ── 3. merge ─────────────────────────────────────────────────────
         const merged =
@@ -431,8 +519,10 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         await transcodeToOpus(inputFile.local_path, songOpus);
         entries.push({ name: "song.opus", data: fs.readFileSync(songOpus) });
 
+        // Only ship stem audio for instruments that actually charted, so the
+        // stems/ folder matches the parts present in notes.chart.
         const seenStemAudio = new Set<string>();
-        for (const entry of instrEntries) {
+        for (const { entry } of kept) {
             if (seenStemAudio.has(entry.chName)) continue;
             const sp = stemPathByStem.get(entry.stem);
             if (sp && fs.existsSync(sp)) {
@@ -444,19 +534,18 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         }
 
         // Clone Hero reads the embedded metadata as the song.ini, so no separate
-        // song.ini file is needed inside the archive.
+        // song.ini file is needed inside the archive. Advertise only the parts
+        // that actually produced notes (see selectInstrumentsWithNotes) so the
+        // difficulties line up with the tracks in notes.chart.
         const diffValue = String({ Expert: 5, Hard: 4, Medium: 3, Easy: 1 }[diffPrefix] ?? 5);
-        const has = (name: string) => instruments.some((x) => x.toLowerCase() === name);
+        const producedChNames = new Set(kept.map((c) => c.entry.chName));
         const sngBuf = packSng(entries, {
             name: songTitle,
             artist: "Dolly",
             album: "audio2chart",
             genre: "Rock",
             charter: "Dolly (audio2chart)",
-            diff_guitar: has("guitar") ? diffValue : "-1",
-            diff_bass: has("bass") ? diffValue : "-1",
-            diff_drums: has("drums") || has("drum") ? diffValue : "-1",
-            diff_keys: has("keys") || has("keyboard") || has("piano") ? diffValue : "-1",
+            ...songIniDiffFields(producedChNames, diffValue),
         });
         const sngName = `${sanitize(songTitle)}.sng`;
         const sngPath = path.join(workDir, sngName);
@@ -502,10 +591,17 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
     }
 }
 
+const AUDIO2CHART_DIFFICULTIES = ["Expert", "Hard", "Medium", "Easy"] as const;
+const DIFFICULTY_PREFIX_RE = /^(Expert|Hard|Medium|Easy)/;
+
 /**
- * Rebuild a chart so every instrument track is renamed to `targetSection`.
- * audio2chart always emits a single [ExpertSingle] track; this places it on
- * the correct Clone Hero instrument/difficulty.
+ * Rebuild a chart so its instrument tracks land on `targetSection`.
+ *
+ * audio2chart emits a `[<Difficulty>Single]` track per difficulty it generated (Expert,
+ * plus real Hard/Medium/Easy reductions); each is placed on the same Clone Hero
+ * instrument as `targetSection` under its own difficulty prefix. An older deployment
+ * returns only `[ExpertSingle]`: that single track is placed on `targetSection` as-is,
+ * so the requested difficulty is still honoured.
  *
  * When `drums` is set the note lanes are also translated from 5-lane guitar
  * semantics to drum semantics (see {@link remapDrumEvent}). This is required:
@@ -515,14 +611,23 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
  */
 export function remapChartTracks(chart: Chart, targetSection: string, drums = false): Chart {
     const tracks = new Map<string, ChartSection>();
-    // Prefer an ExpertSingle source; otherwise take the first available track.
-    const source =
-        chart.tracks.get("ExpertSingle") ?? [...chart.tracks.values()][0];
-    if (source) {
+    const place = (name: string, source: ChartSection): void => {
         const events = drums
             ? dedupeDrumNoteEvents(source.events.flatMap(remapDrumEvent))
             : source.events;
-        tracks.set(targetSection, { name: targetSection, events });
+        tracks.set(name, { name, events });
+    };
+
+    const generated = AUDIO2CHART_DIFFICULTIES.filter((d) => chart.tracks.has(`${d}Single`));
+    if (generated.length > 1) {
+        const instrumentSection = targetSection.replace(DIFFICULTY_PREFIX_RE, "");
+        for (const difficulty of generated) {
+            place(`${difficulty}${instrumentSection}`, chart.tracks.get(`${difficulty}Single`)!);
+        }
+    } else {
+        // Prefer an ExpertSingle source; otherwise take the first available track.
+        const source = chart.tracks.get("ExpertSingle") ?? [...chart.tracks.values()][0];
+        if (source) place(targetSection, source);
     }
     return {
         song: chart.song,
@@ -595,26 +700,47 @@ function normalizeBpm(bpm: number | null | undefined): number | null {
     return n;
 }
 
+/** How far (as a fraction) a chart's own tempo may sit from the confirmed BPM and still agree. */
+const TEMPO_AGREEMENT = 0.1;
+
 /**
- * Force the chart to a single constant tempo. audio2chart charts notes against
- * one fixed BPM, so the SyncTrack should declare exactly that: we drop any
- * tempo (`B`) events the model emitted and anchor one at position 0. Time
- * signature and other sync events are preserved. `.chart` encodes BPM as
- * milli-BPM (BPM × 1000), e.g. 120 BPM → `0 = B 120000`.
+ * Make the SyncTrack agree with the BPM the user confirmed.
+ *
+ * audio2chart writes notes against its own tempo map: one constant tempo fitted to the
+ * confirmed BPM, or (the default) a map that follows the song's tracked beats, with the
+ * confirmed BPM choosing the beat octave. Either way the notes' ticks are only correct
+ * against *that* map, so a map whose median tempo is within {@link TEMPO_AGREEMENT} of
+ * the confirmed BPM is kept as is. Anything else (a service that ignored the BPM) is
+ * replaced by a single constant tempo anchored at position 0. Time signature and other
+ * sync events are preserved. `.chart` encodes BPM as milli-BPM (BPM × 1000), e.g.
+ * 120 BPM → `0 = B 120000`.
  */
-function enforceTempo(chart: Chart, bpm: number): void {
-    const milliBpm = String(Math.round(bpm * 1000));
-    const kept = chart.syncTrack.events.filter((e) => e.typeCode !== "B");
-    const hasTimeSig = kept.some((e) => e.typeCode === "TS" && e.position === 0);
-    const seed: TrackEvent[] = [{ position: 0, typeCode: "B", values: [milliBpm] }];
-    if (!hasTimeSig) {
+export function enforceTempo(chart: Chart, bpm: number): void {
+    const hasTimeSig = chart.syncTrack.events.some((e) => e.typeCode === "TS" && e.position === 0);
+    const ensureTimeSig = (events: TrackEvent[]): TrackEvent[] =>
         // A chart with a tempo but no time signature is malformed for some
         // parsers; default to 4/4 if the model omitted one.
-        seed.unshift({ position: 0, typeCode: "TS", values: ["4"] });
+        hasTimeSig ? events : [{ position: 0, typeCode: "TS", values: ["4"] }, ...events];
+
+    const tempos = chart.syncTrack.events
+        .filter((e) => e.typeCode === "B")
+        .map((e) => Number(e.values[0]) / 1000)
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => a - b);
+    const median = tempos[Math.floor(tempos.length / 2)];
+    if (median !== undefined && Math.abs(median - bpm) / bpm <= TEMPO_AGREEMENT) {
+        chart.syncTrack = {
+            name: chart.syncTrack.name,
+            events: ensureTimeSig(chart.syncTrack.events),
+        };
+        return;
     }
+
+    const milliBpm = String(Math.round(bpm * 1000));
+    const kept = chart.syncTrack.events.filter((e) => e.typeCode !== "B");
     chart.syncTrack = {
         name: chart.syncTrack.name,
-        events: [...seed, ...kept],
+        events: ensureTimeSig([{ position: 0, typeCode: "B", values: [milliBpm] }, ...kept]),
     };
 }
 
