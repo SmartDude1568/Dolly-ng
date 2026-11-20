@@ -14,6 +14,7 @@ import { startConversion } from "../worker.js";
 import { resumeConversion } from "../resume.js";
 import { getAudioDurationSec, MIN_AUDIO_DURATION_SEC } from "../../audio-duration.js";
 import type { ConversionRecord, TaskRecord, TaskType } from "../types.js";
+import { validateUserSongMetadata } from "../../identify.js";
 
 export const conversionsRouter = Router();
 
@@ -34,10 +35,16 @@ const VALID_DIFFICULTIES: ReadonlySet<string> = new Set(["expert", "hard", "medi
 // ── POST /conversions ───────────────────────────────────────────────────
 
 conversionsRouter.post("/", async (req, res) => {
-    const { input_file_id, instruments: rawInstruments, difficulty: rawDifficulty } = req.body as {
+    const {
+        input_file_id,
+        instruments: rawInstruments,
+        difficulty: rawDifficulty,
+        metadata: rawMetadata,
+    } = req.body as {
         input_file_id?: string;
         instruments?: unknown;
         difficulty?: unknown;
+        metadata?: unknown;
     };
 
     if (!input_file_id) {
@@ -59,6 +66,14 @@ conversionsRouter.post("/", async (req, res) => {
     if (!difficulty.ok) {
         res.status(422).json({
             error: { code: "INVALID_INPUT", message: difficulty.message },
+        });
+        return;
+    }
+
+    const metadata = validateUserSongMetadata(rawMetadata);
+    if (!metadata.ok) {
+        res.status(422).json({
+            error: { code: "INVALID_INPUT", message: metadata.message },
         });
         return;
     }
@@ -119,7 +134,9 @@ conversionsRouter.post("/", async (req, res) => {
     }
 
     // 3. upload_s3 task
-    taskRecords.push(makeTask(userId, "upload_s3", input_file_id, {}, now));
+    taskRecords.push(
+        makeTask(userId, "upload_s3", input_file_id, metadata.value ? { metadata: metadata.value } : {}, now),
+    );
 
     // Persist all tasks
     for (const t of taskRecords) {

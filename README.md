@@ -32,6 +32,14 @@ audio ──▶ stem split ──▶ chart each stem ──▶ merge ──▶ t
    archive following the real [mdsitton SNG spec](https://github.com/mdsitton/SngFileFormat).
 6. **Install** — optionally copied into your Clone Hero `Songs` directory.
 
+**Song identification (web app).** Before splitting, the worker cuts a 12 s snippet
+and asks Shazam what the song is. On a match it fills the chart's title, artist,
+album, genre and year, and downloads the album cover into the `.sng` as
+`album.jpg`/`album.png`. Anything the user typed (`metadata` on
+`POST /v1/conversions`) wins; only blanks are filled. No match, no `shazamio`, no
+network, a bad cover — all fall back to the old defaults and never fail the
+conversion. Needs `pip install shazamio` on the server (see Configuration).
+
 ---
 
 ## Requirements
@@ -64,6 +72,10 @@ DATABASE_URL=postgres://user:pass@host/db
 # Modal audio2chart endpoint (one-shot: POST `audio` field → .chart bytes)
 MODAL_GENERATE_URL=https://melvillevt--audio2chart-generate.modal.run
 AUDIO2CHART_TOKEN=optional_shared_secret
+
+# Song identification (optional; needs `pip install shazamio` for this interpreter)
+SHAZAM_PYTHON=python3
+# SONG_IDENTIFY=off   # disable
 
 # Server
 PORT=3000
@@ -128,7 +140,7 @@ from `/v1/auth/login`).
 | --- | --- |
 | `POST /v1/auth/register` · `login` · `logout` | Account + session management |
 | `POST /v1/files/upload` · `GET /v1/files` · `GET /v1/files/:id/download` · `DELETE /v1/files/:id` | Uploaded audio files |
-| `POST /v1/conversions` | Start a full conversion (rejects audio under the minimum length) |
+| `POST /v1/conversions` | Start a full conversion (rejects audio under the minimum length). Optional `metadata: {title, artist, album, genre, year}` overrides what Shazam finds |
 | `GET /v1/conversions/:id` · `GET /v1/conversions` | Conversion status / list |
 | `POST /v1/conversions/:id/retry` | Re-run a failed / interrupted conversion |
 | `GET /v1/conversions/:id/download` | Download the finished `.sng` |
@@ -153,6 +165,7 @@ src/
   audio-duration.ts   ffmpeg-based duration probe
   chart.ts, chart/    Local + Modal audio2chart clients, .chart parse/write/merge
   sng.ts              Clone Hero .sng archive packer (mdsitton spec)
+  identify.ts         Shazam song identification + album-cover download (scripts/identify_song.py)
   clonehero.ts        Clone Hero install detection
   server/             API routes, worker, resume, Neon DB helpers, middleware
 db/                   schema.sql + migration runner

@@ -28,6 +28,13 @@ import { mergeCharts } from "../chart/merge.js";
 import { packSng, type SngEntry } from "../sng.js";
 import { metrics } from "../metrics.js";
 import {
+    identifySong,
+    identifyWithCache,
+    resolveSongMetadata,
+    validateUserSongMetadata,
+    type SongIdentity,
+} from "../identify.js";
+import {
     dbUpdateTask,
     dbUpdateConversionStatus,
     dbInsertFile,
@@ -263,6 +270,12 @@ export interface WorkerExternals {
             overrides?: { name?: string; sustains?: boolean; beatAudioPath?: string },
         ): Promise<string>;
     };
+    /**
+     * Identify the song (title, artist, album, genre, year and cover art). Optional: when the
+     * worker is overridden and this is omitted, identification is skipped, so no test ever
+     * reaches Shazam. Without an override the worker uses Shazam via src/identify.ts.
+     */
+    identifySong?(audioPath: string): Promise<SongIdentity | null>;
 }
 
 let externalsOverride: WorkerExternals | null = null;
@@ -363,7 +376,25 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         }
 
         const instrEntries = instruments.map(normalizeInstrument);
-        const songTitle = inputFile.name.replace(/\.[^.]+$/, "") || "Dolly Song";
+
+        // ── 0. identify the song ─────────────────────────────────────────
+        // Best effort: an unknown song, a missing Python/shazamio or a network error just
+        // means the old defaults are used. Whatever the user typed wins over what Shazam found.
+        const userMeta = validateUserSongMetadata((uploadTask.settings as { metadata?: unknown }).metadata);
+        const identity = await identifyWithCache(
+            () =>
+                externalsOverride
+                    ? (externalsOverride.identifySong?.(inputFile.local_path) ?? Promise.resolve(null))
+                    : identifySong(inputFile.local_path, { workDir }),
+            workDir,
+            log,
+        );
+        const song = resolveSongMetadata(
+            userMeta.ok ? userMeta.value : undefined,
+            identity,
+            inputFile.name.replace(/\.[^.]+$/, "") || "Dolly Song",
+        );
+        const songTitle = song.title;
 
         // ── 1. split_stems ───────────────────────────────────────────────
         active = splitTask;
@@ -486,7 +517,11 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
                 : mergeCharts(perInstrumentCharts, { conflictStrategy: "last-wins" });
 
         merged.song.Name = songTitle;
-        merged.song.Artist = "Dolly";
+        merged.song.Artist = song.artist;
+        merged.song.Album = song.album;
+        merged.song.Genre = song.genre;
+        // .chart convention (Moonscraper) is `Year = ", 2020"`.
+        if (song.year) merged.song.Year = `, ${song.year}`;
         merged.song.Charter = "Dolly (audio2chart)";
         merged.song.MusicStream = "song.opus";
 
@@ -539,11 +574,14 @@ export async function runConversion(args: RunConversionArgs): Promise<void> {
         // difficulties line up with the tracks in notes.chart.
         const diffValue = String({ Expert: 5, Hard: 4, Medium: 3, Easy: 1 }[diffPrefix] ?? 5);
         const producedChNames = new Set(kept.map((c) => c.entry.chName));
+        // Album art: Clone Hero reads album.jpg / album.png from the song folder.
+        if (identity?.cover) entries.push({ name: identity.cover.name, data: identity.cover.data });
         const sngBuf = packSng(entries, {
             name: songTitle,
-            artist: "Dolly",
-            album: "audio2chart",
-            genre: "Rock",
+            artist: song.artist,
+            album: song.album,
+            genre: song.genre,
+            ...(song.year ? { year: song.year } : {}),
             charter: "Dolly (audio2chart)",
             ...songIniDiffFields(producedChNames, diffValue),
         });
