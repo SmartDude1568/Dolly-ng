@@ -14,6 +14,7 @@ import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { SongIdentity } from "../src/identify.js";
+import { parseChart } from "../src/chart/parse.js";
 
 interface ApiError {
     error: { code: string; message: string };
@@ -235,6 +236,22 @@ async function main(): Promise<void> {
             assert.ok(!sng.meta.has("year"), "no year invented");
             assert.ok(!chart.includes("Year ="));
             assert.ok(![...sng.files.keys()].some((n) => n.startsWith("album.")));
+        });
+
+        await step("titles with quotes/newlines (Shazam or typed) cannot corrupt notes.chart: [Song] still parses and keeps every field", async () => {
+            shazam.result = { ...heatWaves, title: 'Don\'t Stop "Believin\'"', artist: 'Journey\n"Live"' };
+            const a = await convert();
+            const songA = parseChart(a.chart).song;
+            assert.strictEqual(songA.Name, "Don't Stop 'Believin''");
+            assert.strictEqual(songA.Artist, "Journey 'Live'");
+            assert.strictEqual(songA.Album, "Dreamland");
+            assert.strictEqual(songA.Year, ", 2020");
+            assert.strictEqual(a.sng.meta.get("name"), "Don't Stop 'Believin''");
+
+            shazam.result = heatWaves;
+            const b = await convert({ metadata: { title: '"Heroes"\nremaster' } });
+            assert.strictEqual(parseChart(b.chart).song.Name, "'Heroes' remaster");
+            assert.strictEqual(parseChart(b.chart).song.Artist, "Glass Animals");
         });
 
         await step("PNG cover ships as album.png", async () => {

@@ -84,8 +84,18 @@ export interface ResolvedSongMetadata {
 /** What Dolly used before identification existed; kept as the fallback for unknown songs. */
 export const DEFAULT_SONG_FIELDS = { artist: "Dolly", album: "audio2chart", genre: "Rock" } as const;
 
-const nonEmpty = (v: unknown): string | undefined =>
-    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+/**
+ * `.chart` [Song] values are written as `Key = "value"` with no escaping, so a `"` or a
+ * newline in a title would corrupt the section. Collapse all whitespace (incl. newlines) to
+ * single spaces and turn double quotes into single quotes.
+ */
+export const cleanText = (v: string): string => v.replace(/\s+/g, " ").replace(/"/g, "'").trim();
+
+const nonEmpty = (v: unknown): string | undefined => {
+    if (typeof v !== "string") return undefined;
+    const c = cleanText(v);
+    return c === "" ? undefined : c;
+};
 
 const USER_META_KEYS = ["title", "artist", "album", "genre", "year"] as const;
 
@@ -107,7 +117,7 @@ export function validateUserSongMetadata(
             return { ok: false, message: `metadata.${key} is not a supported field (${USER_META_KEYS.join(", ")})` };
         }
         if (typeof value !== "string") return { ok: false, message: `metadata.${key} must be a string` };
-        const v = value.trim();
+        const v = cleanText(value);
         if (v === "") continue; // blank = "let Shazam fill it"
         if (v.length > 200) return { ok: false, message: `metadata.${key} must be at most 200 characters` };
         if (key === "year" && !/^\d{4}$/.test(v)) return { ok: false, message: "metadata.year must be a 4-digit year" };
@@ -147,12 +157,14 @@ export function resolveSongMetadata(
     identity: SongIdentity | null,
     fallbackTitle: string,
 ): ResolvedSongMetadata {
-    const year = nonEmpty(user?.year) ?? identity?.year;
+    // Every source goes through nonEmpty (cleanText) so nothing unsafe reaches notes.chart,
+    // including the file name and identities that did not come through parseMatch.
+    const year = nonEmpty(user?.year) ?? nonEmpty(identity?.year);
     return {
-        title: nonEmpty(user?.title) ?? identity?.title ?? fallbackTitle,
-        artist: nonEmpty(user?.artist) ?? identity?.artist ?? DEFAULT_SONG_FIELDS.artist,
-        album: nonEmpty(user?.album) ?? identity?.album ?? DEFAULT_SONG_FIELDS.album,
-        genre: nonEmpty(user?.genre) ?? identity?.genre ?? DEFAULT_SONG_FIELDS.genre,
+        title: nonEmpty(user?.title) ?? nonEmpty(identity?.title) ?? nonEmpty(fallbackTitle) ?? "Dolly Song",
+        artist: nonEmpty(user?.artist) ?? nonEmpty(identity?.artist) ?? DEFAULT_SONG_FIELDS.artist,
+        album: nonEmpty(user?.album) ?? nonEmpty(identity?.album) ?? DEFAULT_SONG_FIELDS.album,
+        genre: nonEmpty(user?.genre) ?? nonEmpty(identity?.genre) ?? DEFAULT_SONG_FIELDS.genre,
         year,
     };
 }

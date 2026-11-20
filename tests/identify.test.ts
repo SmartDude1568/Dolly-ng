@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+    cleanText,
     enlargeCoverUrl,
     fetchCoverArt,
     identifySong,
@@ -116,6 +117,19 @@ async function main(): Promise<void> {
                 assert.strictEqual(r.ok, false, JSON.stringify(raw));
             }
             assert.deepStrictEqual(validateUserSongMetadata({ title: "x".repeat(200) }).ok, true);
+        });
+
+        await step("quotes and newlines are neutralised in every source: Shazam, typed values and the file name", () => {
+            assert.strictEqual(cleanText('  Don\'t Stop "Believin\'"\n\t(Live)  '), "Don't Stop 'Believin'' (Live)");
+            const m = parseMatch({ title: '"Heroes"', artist: 'A\r\nB', album: 'x "y"' })!;
+            assert.deepStrictEqual([m.title, m.artist, m.album], ["'Heroes'", "A B", "x 'y'"]);
+            const v = validateUserSongMetadata({ title: 'Say "Hi"\nthere' });
+            assert.deepStrictEqual(v, { ok: true, value: { title: "Say 'Hi' there" } });
+            const r = resolveSongMetadata(undefined, { title: 'T "1"', artist: "A\nB" }, 'my "file"');
+            assert.deepStrictEqual([r.title, r.artist], ["T '1'", "A B"]);
+            assert.strictEqual(resolveSongMetadata(undefined, null, 'my "file"').title, "my 'file'");
+            assert.strictEqual(resolveSongMetadata(undefined, null, '""').title, "''");
+            assert.strictEqual(resolveSongMetadata(undefined, null, "  ").title, "Dolly Song");
         });
 
         // ── cover art ───────────────────────────────────────────────────
